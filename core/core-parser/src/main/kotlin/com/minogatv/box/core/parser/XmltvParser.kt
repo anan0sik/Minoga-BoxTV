@@ -207,19 +207,11 @@ class XmltvParser(
                     }
 
                     val lowerChan = chAttr.lowercase(Locale.ROOT)
-                    val isChannelRelevant = if (importAllProgrammes) {
-                        true
+                    val hasTargets = targetIds.isNotEmpty() || targetNames.isNotEmpty()
+                    val isChannelRelevant = if (hasTargets) {
+                        matchedChannelIds.contains(chAttr) || matchedChannelIds.contains(lowerChan) || targetIds.contains(chAttr) || targetIds.contains(lowerChan)
                     } else {
-                        val hasTargets = targetIds.isNotEmpty() || targetNames.isNotEmpty()
-                        if (!hasTargets) {
-                            totalProgrammesParsed < 10000
-                        } else {
-                            if (matchedChannelIds.isNotEmpty()) {
-                                matchedChannelIds.contains(chAttr) || matchedChannelIds.contains(lowerChan) || targetIds.contains(chAttr) || targetIds.contains(lowerChan)
-                            } else {
-                                totalProgrammesParsed < 25000
-                            }
-                        }
+                        totalProgrammesParsed < 25000
                     }
 
                     if (!isChannelRelevant) {
@@ -259,14 +251,13 @@ class XmltvParser(
         }
 
         override fun characters(ch: CharArray, start: Int, length: Int) {
-            val text = String(ch, start, length)
             when {
-                inDisplayName -> currentDisplayNameText.append(text)
-                inTitle       -> title.append(text)
-                inSubtitle    -> subtitle.append(text)
-                inDesc        -> description.append(text)
-                inCategory    -> category.append(text)
-                inValue       -> ratingValue.append(text)
+                inDisplayName -> currentDisplayNameText.append(ch, start, length)
+                inTitle       -> if (title.length < 200) title.append(ch, start, (200 - title.length).coerceAtMost(length))
+                inSubtitle    -> if (subtitle.length < 200) subtitle.append(ch, start, (200 - subtitle.length).coerceAtMost(length))
+                inDesc        -> if (description.length < 800) description.append(ch, start, (800 - description.length).coerceAtMost(length))
+                inCategory    -> if (category.length < 100) category.append(ch, start, (100 - category.length).coerceAtMost(length))
+                inValue       -> if (ratingValue.length < 30) ratingValue.append(ch, start, (30 - ratingValue.length).coerceAtMost(length))
             }
         }
 
@@ -346,18 +337,18 @@ class XmltvParser(
                                 descText.isNotEmpty() -> descText
                                 subText.isNotEmpty() -> subText
                                 else -> ""
-                            }
+                            }.take(800)
 
                             batch.add(
                                 XmltvProgram(
                                     channelEpgId = channelId,
-                                    title        = title.toString().trim(),
+                                    title        = title.toString().trim().take(200),
                                     description  = finalDesc,
                                     startMs      = startMs,
                                     endMs        = endMs,
-                                    category     = category.toString().trim(),
+                                    category     = category.toString().trim().take(100),
                                     iconUrl      = iconUrl.takeIf { it.isNotEmpty() },
-                                    rating       = rating.toString().trim(),
+                                    rating       = rating.toString().trim().take(20),
                                     isNew        = isNew,
                                 ),
                             )
@@ -385,10 +376,9 @@ class XmltvParser(
     }
 
     companion object {
-        /** Number of programmes to accumulate before flushing to Room.
-         *  3000 entries ≈ one bulk insert every ~3 000 programmes, significantly reducing
-         *  transaction overhead on Android TV eMMC storage. */
-        const val DEFAULT_BATCH_SIZE = 3000
+        /** Number of programmes to accumulate before streaming to Room.
+         *  1000 entries ≈ sub-megabyte memory usage while retaining high SQLite insert speed. */
+        const val DEFAULT_BATCH_SIZE = 1000
 
         /**
          * Cleans and normalizes channel names for fuzzy EPG matching

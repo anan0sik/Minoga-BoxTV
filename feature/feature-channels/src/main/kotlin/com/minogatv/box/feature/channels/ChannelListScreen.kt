@@ -421,15 +421,37 @@ fun ChannelListScreen(
             }
 
             // ── Main content: Folders grid OR Channels 2-column split ─
-            if (uiState.folders.isEmpty() && uiState.channels.isEmpty() && !uiState.isLoading) {
-                // Empty state when no channels or playlists are loaded
-                EmptyChannelsView(
-                    isSettingsFocused = uiState.isSettingsFocused,
-                    onOpenSettings = onNavigateToSettings,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                )
+            if (uiState.folders.isEmpty() && uiState.channels.isEmpty()) {
+                if (uiState.isLoading) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(
+                                color = ChannelDesignTokens.NeonCyan,
+                                modifier = Modifier.size(48.dp),
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Загрузка каналов…",
+                                color = ChannelDesignTokens.TextSecondary,
+                                fontSize = 16.sp,
+                            )
+                        }
+                    }
+                } else {
+                    // Empty state when no channels or playlists are loaded
+                    EmptyChannelsView(
+                        isSettingsFocused = uiState.isSettingsFocused,
+                        onOpenSettings = onNavigateToSettings,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    )
+                }
             } else if (uiState.viewMode == ScreenViewMode.FOLDERS) {
                 // Окно 1: Сетка тематических папок (Stitch Category Grid)
                 FolderGrid(

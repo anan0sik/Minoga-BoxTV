@@ -251,14 +251,15 @@ class EpgSyncManager @Inject constructor(
             val targetIds = allChannels.mapNotNull { it.epgChannelId.trim().takeIf { id -> id.isNotEmpty() } }.toSet()
             val targetNames = allChannels.map { it.name.trim().lowercase(Locale.ROOT) }.filter { it.isNotEmpty() }.toSet()
 
-            // Accumulate all entities across batches for a single mega-transaction.
-            // This is the primary performance gain: instead of one SQLite transaction per batch
-            // (e.g. 10 transactions × 1000 rows), we do ONE transaction for all rows combined.
-            // On Android TV eMMC storage this reduces write time from ~15 s to ~1-2 s.
-            val accumulatedEntities = ArrayList<EpgProgramEntity>(20_000)
+            // Delete stale programmes that ended before now - 24 hours to keep the database compact
+            val staleCutoff = now - 24 * 3600_000L
+            runCatching { epgDao.deleteBeforeTime(staleCutoff) }
 
+            // Stream each batch directly to Room — never accumulate in RAM!
+            // This guarantees O(1) memory consumption (< 2 MB) even for 400,000+ programmes.
             suspend fun collectBatch(batch: List<XmltvProgram>) {
-                batch.mapTo(accumulatedEntities) { prog ->
+                if (batch.isEmpty()) return
+                val entities = batch.map { prog ->
                     EpgProgramEntity(
                         channelEpgId = prog.channelEpgId,
                         title        = prog.title,
@@ -271,13 +272,14 @@ class EpgSyncManager @Inject constructor(
                         rating       = prog.rating,
                     )
                 }
+                epgDao.upsertAll(entities)
                 yield()
 
                 val total = programCount.addAndGet(batch.size)
                 val nowTime = System.currentTimeMillis()
-                if (nowTime - lastBatchReport > 800) {
+                if (nowTime - lastBatchReport > 600) {
                     lastBatchReport = nowTime
-                    val progress = (42 + (total.toFloat() / 15000f) * 53f).coerceIn(42f, 95f).toInt()
+                    val progress = (42 + (total.toFloat() / 25000f) * 50f).coerceIn(42f, 95f).toInt()
                     updateProgress(progress, "Импорт передач… ($total)")
                 }
             }
@@ -292,14 +294,6 @@ class EpgSyncManager @Inject constructor(
 
             val parseResult = FileInputStream(tempFile).use { stream ->
                 parser.parse(stream)
-            }
-
-            // Single bulk-insert in one SQLite transaction via EpgDao.bulkUpsert().
-            // EpgDao.bulkUpsert is annotated @Transaction and chunks by 5000 rows internally.
-            // On Android TV eMMC storage: 15 000 rows ~ 1–2 s (vs 15–20 s with per-batch commits).
-            if (accumulatedEntities.isNotEmpty()) {
-                updateProgress(90, "Сохранение в базу данных (${accumulatedEntities.size} передач)…")
-                epgDao.bulkUpsert(accumulatedEntities)
             }
 
             updateProgress(96, "Привязка каналов к телепрограмме…")

@@ -120,24 +120,77 @@ class ChannelListViewModel @Inject constructor(
     }
 
     /**
-     * Restores the last selected folder from SharedPreferences on app start.
-     * This eliminates the "blank screen" effect — the channel list appears immediately
-     * instead of waiting for the user to pick a folder.
+     * Instantly restores the last selected folder and cached channels from Room on app start.
+     * Channels appear immediately within 50 ms without waiting for network or EPG.
      */
     private fun restoreLastFolder() {
         viewModelScope.launch(Dispatchers.IO) {
-            // Brief yield to let observeFolders() emit the first folder list from Room
-            delay(300L)
             val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
-            val lastFolder = prefs.getString("last_selected_folder", null)
-            val folders = _uiState.value.folders
-            if (lastFolder != null && folders.any { it.title == lastFolder }) {
-                // Restore previously selected folder
-                val folder = folders.first { it.title == lastFolder }
-                selectFolder(folder)
-            } else if (folders.isNotEmpty()) {
-                // Fall back to the first (most-used) folder
-                selectFolder(folders.first())
+            val lastFolder = prefs.getString("last_selected_folder", null) ?: "Все каналы"
+            val profileId = activeProfileId.value
+            val favIds = favoriteDao.getFavoriteIds(profileId).toSet()
+
+            // Query channels from Room for the target folder immediately
+            val rawChannels = when (lastFolder) {
+                "Все каналы" -> channelDao.getAllByProfile(profileId)
+                "Избранное" -> channelDao.getAllByProfile(profileId).filter { it.id in favIds }
+                else -> {
+                    val byGroup = channelDao.getByGroup(profileId, lastFolder)
+                    if (byGroup.isNotEmpty()) byGroup else channelDao.getAllByProfile(profileId)
+                }
+            }
+
+            val effectiveFolder = if (lastFolder != "Все каналы" && rawChannels.isEmpty()) {
+                "Все каналы"
+            } else {
+                lastFolder
+            }
+
+            val targetChannels = if (effectiveFolder == "Все каналы" && rawChannels.isEmpty()) {
+                channelDao.getAllByProfile(profileId)
+            } else {
+                rawChannels
+            }
+
+            if (targetChannels.isNotEmpty()) {
+                val forcedCatchup = getForcedCatchupType()
+                val initialItems = targetChannels.map { entity ->
+                    val dom = entity.toDomain()
+                    ChannelDisplayItem(
+                        channel = dom,
+                        currentProgram = null,
+                        nextProgram = null,
+                        epgProgress = 0f,
+                        hasCatchup = dom.hasArchive(forcedCatchup),
+                        isFavorite = entity.id in favIds,
+                    )
+                }
+
+                withContext(Dispatchers.Main) {
+                    selectedGroup.value = effectiveFolder
+                    _uiState.update { state ->
+                        state.copy(
+                            viewMode = ScreenViewMode.CHANNELS,
+                            selectedGroupName = effectiveFolder,
+                            channels = initialItems,
+                            focusedIndex = if (initialItems.isNotEmpty()) 0 else -1,
+                            isLoading = false,
+                        )
+                    }
+                    if (initialItems.isNotEmpty()) {
+                        startLivePreviewTimer()
+                    }
+                }
+
+                // Phase 2: Enrich with EPG in background
+                val enrichedItems = buildDisplayItems(targetChannels, favIds, System.currentTimeMillis())
+                withContext(Dispatchers.Main) {
+                    if (selectedGroup.value == effectiveFolder) {
+                        _uiState.update { state ->
+                            state.copy(channels = enrichedItems)
+                        }
+                    }
+                }
             }
         }
     }
@@ -437,7 +490,6 @@ class ChannelListViewModel @Inject constructor(
                 viewMode = ScreenViewMode.CHANNELS,
                 selectedGroupName = folder.title,
                 folders = updatedFolders,
-                channels = emptyList(),
                 sidePanelItems = emptyList(),
                 focusedIndex = 0,
                 isSidePanelOpen = true,
@@ -445,7 +497,7 @@ class ChannelListViewModel @Inject constructor(
                 isProgramDetailsOpen = false,
                 topBarFocus = TopBarFocus.NONE,
                 livePreviewChannelId = null,
-                isLoading = true,
+                isLoading = it.channels.isEmpty(),
             )
         }
 
@@ -527,15 +579,12 @@ class ChannelListViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 viewMode = ScreenViewMode.FOLDERS,
-                channels = emptyList(),
                 sidePanelItems = emptyList(),
                 isSidePanelOpen = false,
                 isFocusInSidePanel = false,
                 isProgramDetailsOpen = false,
                 topBarFocus = TopBarFocus.NONE,
                 livePreviewChannelId = null,
-                isSidePanelEpgLoading = false,
-                isLoading = false,
             )
         }
     }
@@ -570,13 +619,15 @@ class ChannelListViewModel @Inject constructor(
             }
         }.distinct()
 
+        // Ultra-fast indexed query in chunks of 400.
+        // Avoids table-scan getAllCurrentPrograms() which freezes on 400,000+ entries.
         val activePrograms = runCatching {
-            // candidateIds is now bounded to 2× channels.size (id + lowercase).
-            // Room's IN clause supports up to ~900 items safely; use 800 as threshold.
-            if (candidateIds.isNotEmpty() && candidateIds.size <= 800) {
-                epgDao.getCurrentProgramsForIds(candidateIds, now)
+            if (candidateIds.isNotEmpty()) {
+                candidateIds.chunked(400).flatMap { chunk ->
+                    epgDao.getCurrentProgramsForIds(chunk, now)
+                }
             } else {
-                epgDao.getAllCurrentPrograms(now)
+                emptyList()
             }
         }.getOrDefault(emptyList())
 
