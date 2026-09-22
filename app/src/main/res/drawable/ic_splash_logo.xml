@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <!-- Rounded badge background -->
+    <path
+        android:fillColor="#FF161B26"
+        android:pathData="M20,10 h80 a10,10 0 0 1 10,10 v80 a10,10 0 0 1 -10,10 h-80 a10,10 0 0 1 -10,-10 v-80 a10,10 0 0 1 10,-10 z" />
+    <!-- TV antenna / accent line -->
+    <path
+        android:fillColor="#FF00E5FF"
+        android:pathData="M48,16 L60,26 L72,16 L74,18 L61,29 L60,29 L46,18 Z" />
+    <!-- Minoga "M" brand lettermark in vibrant electric cyan / blue -->
+    <path
+        android:fillColor="#FF4F8EF7"
+        android:pathData="M28,92 L28,38 L44,38 L60,68 L76,38 L92,38 L92,92 L78,92 L78,64 L64,92 L56,92 L42,64 L42,92 Z" />
+</vector>

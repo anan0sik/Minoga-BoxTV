@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme — no action bar, edge-to-edge -->
+    <style name="Theme.MinogaTVBox" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/minoga_bg</item>
+        <item name="android:colorPrimary">@color/minoga_blue</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- Splash theme: displays instant branded waiting screen during cold start -->
+    <style name="Theme.MinogaTVBox.Splash" parent="Theme.MinogaTVBox">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+    </style>
+</resources>
