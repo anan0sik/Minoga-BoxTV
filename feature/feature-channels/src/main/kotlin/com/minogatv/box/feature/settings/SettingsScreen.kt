@@ -828,8 +828,7 @@ fun SettingsScreen(
                     ) {
                         Button(
                             onClick = {
-                                val jsonCount = uiState.playlists.size
-                                Toast.makeText(context, "Экспортировано $jsonCount плейлистов в backup.json", Toast.LENGTH_LONG).show()
+                                viewModel.exportBackup()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Surface2),
                             shape = RoundedCornerShape(8.dp),
@@ -841,7 +840,7 @@ fun SettingsScreen(
 
                         OutlinedButton(
                             onClick = {
-                                Toast.makeText(context, "Импорт настроек готов к выбору файла", Toast.LENGTH_SHORT).show()
+                                viewModel.importBackup()
                             },
                             shape = RoundedCornerShape(8.dp),
                         ) {
@@ -932,6 +931,30 @@ fun SettingsScreen(
                 TextButton(onClick = { deleteTarget = null }) {
                     Text("Отмена", color = Accent)
                 }
+            },
+        )
+    }
+
+    // ── Backup message dialog ────────────────────────────────────────────────
+    uiState.backupMessage?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissBackupMessage() },
+            containerColor = Surface1,
+            title = {
+                Text("Резервное копирование", color = TextPrim, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    text = msg,
+                    color = TextSec,
+                    fontSize = 14.sp,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.dismissBackupMessage() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                ) { Text("OK", color = Color.Black) }
             },
         )
     }

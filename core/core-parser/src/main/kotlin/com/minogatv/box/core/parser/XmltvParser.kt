@@ -41,6 +41,7 @@ class XmltvParser(
     private val targetChannelIds: Set<String> = emptySet(),
     private val targetChannelNames: Set<String> = emptySet(),
     private val importAllProgrammes: Boolean = false,
+    private val onProgress: (suspend (percent: Int, status: String) -> Unit)? = null,
     private val onBatch: suspend (List<XmltvProgram>) -> Unit,
 ) {
 
@@ -91,6 +92,8 @@ class XmltvParser(
             batchSize = batchSize,
             targetIds = targetChannelIds,
             targetNames = targetChannelNames.map { it.trim().lowercase(Locale.ROOT) }.toSet(),
+            importAllProgrammes = importAllProgrammes,
+            onProgress = onProgress,
             onBatch = onBatch,
         )
 
@@ -98,6 +101,7 @@ class XmltvParser(
             saxParser.xmlReader.entityResolver = handler
         } catch (_: Exception) {}
 
+        onProgress?.invoke(44, "Анализ XMLTV структуры…")
         saxParser.parse(InputSource(effectiveStream).also { it.encoding = "UTF-8" }, handler)
 
         // Flush any remaining programmes that didn't fill a complete batch
@@ -117,6 +121,8 @@ class XmltvParser(
         private val batchSize: Int,
         private val targetIds: Set<String>,
         private val targetNames: Set<String>,
+        private val importAllProgrammes: Boolean,
+        private val onProgress: (suspend (percent: Int, status: String) -> Unit)?,
         private val onBatch: suspend (List<XmltvProgram>) -> Unit,
     ) : DefaultHandler() {
 
@@ -132,13 +138,19 @@ class XmltvParser(
         private val currentDisplayNameText = StringBuilder()
         private val currentDisplayNames = mutableListOf<String>()
 
+        private var channelCount = 0
+        private var rawProgrammesCount = 0
+        private var lastProgressReportTime = 0L
+
         val nameToEpgId = mutableMapOf<String, String>()
         val channelLogos = mutableMapOf<String, String>()
         val nameToLogo = mutableMapOf<String, String>()
         val matchedChannelIds = mutableSetOf<String>().apply { addAll(targetIds) }
+
+        private val lowerTargetIds: Set<String> = targetIds.map { it.lowercase(Locale.ROOT) }.toSet()
+        private val lowerTargetNames: Set<String> = targetNames.map { it.lowercase(Locale.ROOT) }.toSet()
         private val targetNormalizedNames: Set<String> =
             targetNames.map { normalizeChannelName(it) }.filter { it.isNotEmpty() }.toSet()
-        private var isFirstProgramme = true
 
         // Current element state for programmes
         private var inProgramme = false
@@ -187,19 +199,16 @@ class XmltvParser(
                     }
                 }
                 "programme" -> {
-                    if (isFirstProgramme) {
-                        isFirstProgramme = false
-                        if (targetNormalizedNames.isNotEmpty()) {
-                            for ((name, epgId) in nameToEpgId) {
-                                for (tName in targetNormalizedNames) {
-                                    if (name == tName || name.contains(tName) || (tName.length >= 4 && tName.contains(name))) {
-                                        matchedChannelIds.add(epgId)
-                                        matchedChannelIds.add(epgId.lowercase(Locale.ROOT))
-                                    }
-                                }
-                            }
+                    rawProgrammesCount++
+                    val nowMs = System.currentTimeMillis()
+                    if (rawProgrammesCount == 1 || (rawProgrammesCount % 10000 == 0 && nowMs - lastProgressReportTime > 800)) {
+                        lastProgressReportTime = nowMs
+                        val pct = (46 + (rawProgrammesCount / 10000)).coerceAtMost(92)
+                        runBlocking {
+                            onProgress?.invoke(pct, "Чтение телепередач… ($rawProgrammesCount)")
                         }
                     }
+
                     val chAttr = attrs.getValue("channel")?.trim().orEmpty()
                     if (chAttr.isEmpty()) {
                         inProgramme = false
@@ -208,8 +217,10 @@ class XmltvParser(
 
                     val lowerChan = chAttr.lowercase(Locale.ROOT)
                     val hasTargets = targetIds.isNotEmpty() || targetNames.isNotEmpty()
-                    val isChannelRelevant = if (hasTargets) {
-                        matchedChannelIds.contains(chAttr) || matchedChannelIds.contains(lowerChan) || targetIds.contains(chAttr) || targetIds.contains(lowerChan)
+                    val isChannelRelevant = if (importAllProgrammes) {
+                        true
+                    } else if (hasTargets) {
+                        matchedChannelIds.contains(chAttr) || matchedChannelIds.contains(lowerChan) || targetIds.contains(chAttr) || lowerTargetIds.contains(lowerChan)
                     } else {
                         totalProgrammesParsed < 25000
                     }
@@ -274,33 +285,37 @@ class XmltvParser(
                 }
                 "channel" -> {
                     if (inChannel && currentXmlChannelId.isNotEmpty()) {
+                        channelCount++
+                        if (channelCount == 1 || channelCount % 1000 == 0) {
+                            runBlocking {
+                                onProgress?.invoke(44, "Анализ каналов EPG… ($channelCount)")
+                            }
+                        }
+
                         val lowerXmlId = currentXmlChannelId.lowercase(Locale.ROOT).trim()
                         nameToEpgId[lowerXmlId] = currentXmlChannelId
-                        if (targetIds.contains(currentXmlChannelId) || targetIds.contains(lowerXmlId)) {
-                            matchedChannelIds.add(currentXmlChannelId)
-                            matchedChannelIds.add(lowerXmlId)
-                        }
+                        var isMatched = targetIds.contains(currentXmlChannelId) || lowerTargetIds.contains(lowerXmlId)
 
                         for (dn in currentDisplayNames) {
                             val norm = dn.lowercase(Locale.ROOT).trim()
                             val simplified = normalizeChannelName(dn)
                             if (norm.isNotEmpty()) {
                                 nameToEpgId[norm] = currentXmlChannelId
-                                if (targetNames.contains(norm)) {
-                                    matchedChannelIds.add(currentXmlChannelId)
-                                    matchedChannelIds.add(lowerXmlId)
+                                if (lowerTargetNames.contains(norm)) {
+                                    isMatched = true
                                 }
                             }
                             if (simplified.isNotEmpty()) {
                                 nameToEpgId[simplified] = currentXmlChannelId
-                                val fuzzyMatch = targetNormalizedNames.any { tn ->
-                                    tn == simplified || tn.contains(simplified) || (simplified.length >= 4 && simplified.contains(tn))
-                                }
-                                if (fuzzyMatch) {
-                                    matchedChannelIds.add(currentXmlChannelId)
-                                    matchedChannelIds.add(lowerXmlId)
+                                if (targetNormalizedNames.contains(simplified)) {
+                                    isMatched = true
                                 }
                             }
+                        }
+
+                        if (isMatched) {
+                            matchedChannelIds.add(currentXmlChannelId)
+                            matchedChannelIds.add(lowerXmlId)
                         }
 
                         val logo = channelLogos[currentXmlChannelId]

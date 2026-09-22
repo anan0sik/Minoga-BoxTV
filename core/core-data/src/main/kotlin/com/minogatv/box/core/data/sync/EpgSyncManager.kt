@@ -251,10 +251,6 @@ class EpgSyncManager @Inject constructor(
             val targetIds = allChannels.mapNotNull { it.epgChannelId.trim().takeIf { id -> id.isNotEmpty() } }.toSet()
             val targetNames = allChannels.map { it.name.trim().lowercase(Locale.ROOT) }.filter { it.isNotEmpty() }.toSet()
 
-            // Delete stale programmes that ended before now - 24 hours to keep the database compact
-            val staleCutoff = now - 24 * 3600_000L
-            runCatching { epgDao.deleteBeforeTime(staleCutoff) }
-
             // Stream each batch directly to Room — never accumulate in RAM!
             // This guarantees O(1) memory consumption (< 2 MB) even for 400,000+ programmes.
             suspend fun collectBatch(batch: List<XmltvProgram>) {
@@ -277,9 +273,9 @@ class EpgSyncManager @Inject constructor(
 
                 val total = programCount.addAndGet(batch.size)
                 val nowTime = System.currentTimeMillis()
-                if (nowTime - lastBatchReport > 600) {
+                if (nowTime - lastBatchReport > 500) {
                     lastBatchReport = nowTime
-                    val progress = (42 + (total.toFloat() / 25000f) * 50f).coerceIn(42f, 95f).toInt()
+                    val progress = (48 + (total.toFloat() / 25000f) * 46f).coerceIn(48f, 95f).toInt()
                     updateProgress(progress, "Импорт передач… ($total)")
                 }
             }
@@ -289,6 +285,7 @@ class EpgSyncManager @Inject constructor(
                 targetChannelIds = targetIds,
                 targetChannelNames = targetNames,
                 importAllProgrammes = isManualLink,
+                onProgress = { pct, st -> updateProgress(pct, st) },
                 onBatch = { batch -> collectBatch(batch) },
             )
 
@@ -306,9 +303,6 @@ class EpgSyncManager @Inject constructor(
                     val simplified = XmltvParser.normalizeChannelName(ch.name)
                     val matchedEpgId = parseResult.nameToEpgId[norm]
                         ?: parseResult.nameToEpgId[simplified]
-                        ?: parseResult.nameToEpgId.entries.firstOrNull { (k, _) ->
-                            k == simplified || k.contains(simplified) || (simplified.length >= 4 && simplified.contains(k))
-                        }?.value
 
                     val newEpgId = if (matchedEpgId != null && ch.epgChannelId != matchedEpgId) matchedEpgId else null
 

@@ -19,11 +19,15 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.lifecycleScope
+import com.minogatv.box.core.data.backup.BackupManager
 import com.minogatv.box.feature.channels.ChannelListScreen
 import com.minogatv.box.feature.player.PlayerScreen
 import com.minogatv.box.feature.settings.SettingsScreen
 import com.minogatv.box.ui.theme.MinogaTVBoxTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * # MainActivity
@@ -34,12 +38,19 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    @Inject
+    lateinit var backupManager: BackupManager
+
     private var isPlayerActive by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_MinogaTVBox)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        lifecycleScope.launch {
+            backupManager.checkAndAutoRestoreOnFirstLaunch()
+        }
 
         val prefs = getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
         val autoPlayLast = prefs.getBoolean("auto_play_last_channel", false)

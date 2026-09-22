@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+import com.minogatv.box.core.data.backup.BackupManager
+
 // ─── UI state ─────────────────────────────────────────────────────────────────
 
 data class SettingsUiState(
@@ -27,6 +29,7 @@ data class SettingsUiState(
     val errorMessage: String? = null,
     val epgSyncProgress: Float? = null,
     val epgSyncStatus: String? = null,
+    val backupMessage: String? = null,
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -45,29 +48,37 @@ class SettingsViewModel @Inject constructor(
     private val syncScheduler: SyncScheduler,
     private val playlistDao: PlaylistDao,
     private val epgSyncManager: EpgSyncManager,
+    private val backupManager: BackupManager,
 ) : ViewModel() {
 
     private val _refreshingIds = MutableStateFlow<Set<Long>>(emptySet())
     private val _isLoading     = MutableStateFlow(false)
     private val _errorMessage  = MutableStateFlow<String?>(null)
+    private val _backupMessage = MutableStateFlow<String?>(null)
 
     /** Hardcoded profile — replace with real ProfileRepository in Step 6 */
     private val currentProfileId = 1L
 
     val uiState: StateFlow<SettingsUiState> = combine(
-        playlistRepository.observePlaylists(currentProfileId),
-        _isLoading,
-        _refreshingIds,
+        combine(
+            playlistRepository.observePlaylists(currentProfileId),
+            _isLoading,
+            _refreshingIds,
+        ) { playlists, loading, refreshing ->
+            Triple(playlists, loading, refreshing)
+        },
         _errorMessage,
-        syncScheduler.observeEpgSyncProgressInfo()
-    ) { playlists, loading, refreshing, error, epgSyncInfo ->
+        syncScheduler.observeEpgSyncProgressInfo(),
+        _backupMessage,
+    ) { (playlists, loading, refreshing), error, epgSyncInfo, backupMsg ->
         SettingsUiState(
-            playlists      = playlists,
-            isLoading      = loading,
-            refreshingIds  = refreshing,
-            errorMessage   = error,
+            playlists       = playlists,
+            isLoading       = loading,
+            refreshingIds   = refreshing,
+            errorMessage    = error,
             epgSyncProgress = epgSyncInfo?.progress,
-            epgSyncStatus   = epgSyncInfo?.status
+            epgSyncStatus   = epgSyncInfo?.status,
+            backupMessage   = backupMsg,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -102,6 +113,7 @@ class SettingsViewModel @Inject constructor(
                 } else {
                     playlistRepository.updatePlaylist(playlist)
                 }
+                backupManager.autoBackup()
                 onSuccess()
             } catch (e: Exception) {
                 val msg = e.localizedMessage ?: "Ошибка сохранения: ${e.message}"
@@ -135,6 +147,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching {
                 playlistRepository.deletePlaylist(playlistId)
+                backupManager.autoBackup()
             }.onFailure { e ->
                 _errorMessage.value = "Ошибка удаления: ${e.localizedMessage}"
             }
@@ -166,6 +179,44 @@ class SettingsViewModel @Inject constructor(
                 syncScheduler.triggerManualEpgSync(1L, cleanUrl)
             }
         }
+    }
+
+    fun exportBackup(onComplete: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            val res = backupManager.exportBackup()
+            _isLoading.value = false
+            res.onSuccess { file ->
+                val msg = "Резервная копия успешно сохранена в:\n${file.absolutePath}"
+                _backupMessage.value = msg
+                onComplete?.invoke(true, msg)
+            }.onFailure { err ->
+                val msg = "Ошибка экспорта: ${err.localizedMessage ?: err.message}"
+                _errorMessage.value = msg
+                onComplete?.invoke(false, msg)
+            }
+        }
+    }
+
+    fun importBackup(onComplete: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            val res = backupManager.importBackup()
+            _isLoading.value = false
+            res.onSuccess { stats ->
+                val msg = "Успешно восстановлено из ${stats.filePath}:\n• Плейлистов: ${stats.playlistsRestored}\n• Настроек: ${stats.settingsRestored}\n• Избранных каналов: ${stats.favoritesRestored}"
+                _backupMessage.value = msg
+                onComplete?.invoke(true, msg)
+            }.onFailure { err ->
+                val msg = err.localizedMessage ?: err.message ?: "Ошибка импорта"
+                _errorMessage.value = msg
+                onComplete?.invoke(false, msg)
+            }
+        }
+    }
+
+    fun dismissBackupMessage() {
+        _backupMessage.value = null
     }
 
     fun dismissError() {
