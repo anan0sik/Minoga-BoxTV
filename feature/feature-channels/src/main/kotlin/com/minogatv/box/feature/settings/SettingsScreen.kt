@@ -1879,7 +1879,7 @@ private fun PlaylistRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = playlist.url,
+                text = "🔒 Ссылка на плейлист скрыта",
                 color = if (isFocused) Color(0xFFB0C4DE) else TextSec,
                 fontSize = 11.sp,
                 maxLines = 1,
@@ -2039,6 +2039,7 @@ private fun PlaylistDialog(
                         isError = urlError,
                         supportingText = if (urlError) "Обязательное поле" else null,
                         keyboardType = KeyboardType.Uri,
+                        visualTransformation = if (initial != null) PasswordVisualTransformation() else VisualTransformation.None,
                     )
                 }
 

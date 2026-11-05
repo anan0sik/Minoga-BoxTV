@@ -34,8 +34,8 @@ data class RemoteVersionInfo(
 )
 
 data class AppUpdateState(
-    val localVersionName: String = "1.0.6",
-    val localVersionCode: Int = 7,
+    val localVersionName: String = "1.0.7",
+    val localVersionCode: Int = 8,
     val remoteInfo: RemoteVersionInfo? = null,
     val isChecking: Boolean = false,
     val isDownloading: Boolean = false,
