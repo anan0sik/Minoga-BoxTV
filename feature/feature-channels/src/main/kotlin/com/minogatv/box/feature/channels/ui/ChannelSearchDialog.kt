@@ -46,6 +46,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -94,6 +95,9 @@ fun ChannelSearchDialog(
         focusRequester.requestFocus()
     }
 
+    val config = LocalConfiguration.current
+    val isCompact = config.screenWidthDp < 600 || config.screenHeightDp < 500
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -102,7 +106,10 @@ fun ChannelSearchDialog(
             modifier = modifier
                 .fillMaxSize()
                 .background(ChannelDesignTokens.MidnightBgGradientStart.copy(alpha = 0.95f))
-                .padding(horizontal = 48.dp, vertical = 24.dp),
+                .padding(
+                    horizontal = if (isCompact) 12.dp else 48.dp,
+                    vertical = if (isCompact) 12.dp else 24.dp,
+                ),
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // Header with Search Field and Close

@@ -7,17 +7,22 @@ import com.minogatv.box.core.database.entity.ChannelEntity
 import com.minogatv.box.core.database.entity.PlaylistEntity
 import com.minogatv.box.core.database.entity.UserProfileEntity
 import com.minogatv.box.core.model.Playlist
+import com.minogatv.box.core.model.WebConfig
+import com.minogatv.box.core.model.WebPairingPollResult
 import com.minogatv.box.core.model.enums.PlaylistType
 import com.minogatv.box.core.data.mapper.toDomain
 import com.minogatv.box.core.data.mapper.toEntity
 import com.minogatv.box.core.data.sync.SyncScheduler
 import com.minogatv.box.core.network.ProxyOkHttpClientFactory
 import com.minogatv.box.core.parser.M3uParser
+import com.minogatv.box.core.parser.WebConfigParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -38,6 +43,11 @@ interface PlaylistRepository {
     suspend fun refreshNow(playlistId: Long): Result<Int>
     suspend fun syncPlaylist(playlistId: Long): Result<Int>
     suspend fun validatePlaylistAvailability(playlist: Playlist): Result<Unit>
+    suspend fun fetchWebConfig(pageUrl: String = Playlist.DEFAULT_WEB_CONFIG_URL): Result<WebConfig>
+    suspend fun applyWebConfig(pageUrl: String = Playlist.DEFAULT_WEB_CONFIG_URL, profileId: Long = 1L): Result<WebConfig>
+    suspend fun applySubmittedWebConfig(webConfig: WebConfig, profileId: Long = 1L): Result<WebConfig>
+    suspend fun registerWebPairingCode(code: String, pageUrl: String = Playlist.DEFAULT_WEB_CONFIG_URL): Result<String>
+    suspend fun pollWebPairingCode(code: String, pageUrl: String = Playlist.DEFAULT_WEB_CONFIG_URL): Result<WebPairingPollResult>
 }
 
 @Singleton
@@ -260,6 +270,234 @@ class PlaylistRepositoryImpl @Inject constructor(
             playlistDao.updateLastRefreshed(playlistId, System.currentTimeMillis())
 
             Result.success(channelEntities.size)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun fetchWebConfig(pageUrl: String): Result<WebConfig> = withContext(Dispatchers.IO) {
+        try {
+            val rawBase = pageUrl.trim().ifBlank { Playlist.DEFAULT_WEB_CONFIG_URL }
+            val normalizedBase = Playlist.normalizeUrl(rawBase).trimEnd('/')
+
+            // Build candidate URLs to probe in order:
+            // 1. Primary scheme (/api/config, /config.json, and root HTML page)
+            // 2. Alternate scheme (HTTPS <-> HTTP) or fallback port :8080
+            val bases = mutableListOf(normalizedBase)
+            if (normalizedBase.startsWith("http://", ignoreCase = true)) {
+                bases.add("https://" + normalizedBase.removePrefix("http://"))
+            } else if (normalizedBase.startsWith("https://", ignoreCase = true)) {
+                bases.add("http://" + normalizedBase.removePrefix("https://"))
+            }
+            // If no explicit port was given, also add :8080 as a fallback candidate
+            val hostPart = normalizedBase.substringAfter("://").substringBefore("/")
+            if (!hostPart.contains(":")) {
+                bases.add("http://$hostPart:8080")
+            }
+
+            val candidates = mutableListOf<String>()
+            for (b in bases.distinct()) {
+                if (b.endsWith(".json", ignoreCase = true) || b.endsWith(".html", ignoreCase = true) || b.endsWith(".m3u", ignoreCase = true) || b.endsWith(".m3u8", ignoreCase = true)) {
+                    candidates.add(b)
+                } else {
+                    candidates.add("$b/api/config")
+                    candidates.add("$b/config.json")
+                    candidates.add(b)
+                }
+            }
+
+            val dummyPlaylist = Playlist(profileId = 1L, name = "WebConfig", url = normalizedBase)
+            val client = clientFactory.create(dummyPlaylist).newBuilder()
+                .connectTimeout(7, TimeUnit.SECONDS)
+                .readTimeout(7, TimeUnit.SECONDS)
+                .build()
+
+            var lastError: Exception? = null
+            for (candidateUrl in candidates.distinct()) {
+                try {
+                    val request = Request.Builder()
+                        .url(candidateUrl)
+                        .header("Accept", "application/json, text/html, */*")
+                        .header("Cache-Control", "no-cache")
+                        .build()
+
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val bodyStr = response.body?.string().orEmpty()
+                            val parsed = WebConfigParser.parse(bodyStr, candidateUrl)
+                            if (parsed != null && parsed.playlistUrl.isNotBlank()) {
+                                return@withContext Result.success(parsed.copy(sourcePageUrl = normalizedBase))
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastError = e
+                }
+            }
+
+            val errorMsg = when (lastError) {
+                is java.net.UnknownHostException -> "Сервер $normalizedBase не найден. Проверьте подключение к интернету или DNS."
+                is java.net.SocketTimeoutException -> "Превышено время ожидания ответа от $normalizedBase"
+                is java.net.ConnectException -> "Не удалось подключиться к веб-странице $normalizedBase"
+                else -> "На странице $normalizedBase не найдена ссылка на плейлист"
+            }
+            Result.failure(IOException(errorMsg, lastError))
+        } catch (e: Exception) {
+            Result.failure(IOException("Ошибка чтения веб-страницы: ${e.localizedMessage ?: e.message}", e))
+        }
+    }
+
+    private fun buildCandidateServerBases(pageUrl: String): List<String> {
+        val rawBase = pageUrl.trim().ifBlank { Playlist.DEFAULT_WEB_CONFIG_URL }
+        val normalizedBase = Playlist.normalizeUrl(rawBase).trimEnd('/')
+
+        val bases = mutableListOf<String>()
+        if (normalizedBase.startsWith("http://", ignoreCase = true)) {
+            // Prefer HTTPS: the server redirects HTTP -> HTTPS (301), which drops POST bodies
+            bases.add("https://" + normalizedBase.removePrefix("http://"))
+            bases.add(normalizedBase)
+        } else if (normalizedBase.startsWith("https://", ignoreCase = true)) {
+            bases.add(normalizedBase)
+            bases.add("http://" + normalizedBase.removePrefix("https://"))
+        } else {
+            bases.add(normalizedBase)
+        }
+        val hostPart = normalizedBase.substringAfter("://").substringBefore("/")
+        if (!hostPart.contains(":")) {
+            bases.add("http://$hostPart:8080")
+        }
+        // Fallback for local emulator testing with IptvMockServer
+        bases.add("http://10.0.2.2:8080")
+        return bases.distinct()
+    }
+
+    override suspend fun registerWebPairingCode(code: String, pageUrl: String): Result<String> = withContext(Dispatchers.IO) {
+        val bases = buildCandidateServerBases(pageUrl)
+        val dummyPlaylist = Playlist(profileId = 1L, name = "WebConfig", url = bases.first())
+        val client = clientFactory.create(dummyPlaylist).newBuilder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .build()
+
+        val jsonBody = """{"code":"$code"}""".toRequestBody("application/json; charset=utf-8".toMediaType())
+        var lastError: Exception? = null
+
+        for (base in bases) {
+            try {
+                val request = Request.Builder()
+                    .url("$base/api/code/register")
+                    .post(jsonBody)
+                    .header("Cache-Control", "no-cache")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        return@withContext Result.success(base)
+                    }
+                }
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        Result.failure(lastError ?: IOException("Не удалось зарегистрировать код на сервере $pageUrl"))
+    }
+
+    override suspend fun pollWebPairingCode(code: String, pageUrl: String): Result<WebPairingPollResult> = withContext(Dispatchers.IO) {
+        val bases = buildCandidateServerBases(pageUrl)
+        val dummyPlaylist = Playlist(profileId = 1L, name = "WebConfig", url = bases.first())
+        val client = clientFactory.create(dummyPlaylist).newBuilder()
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(4, TimeUnit.SECONDS)
+            .build()
+
+        var lastError: Exception? = null
+        for (base in bases) {
+            try {
+                val request = Request.Builder()
+                    .url("$base/api/code/poll?code=$code")
+                    .get()
+                    .header("Cache-Control", "no-cache")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val bodyStr = response.body?.string().orEmpty()
+                        val parsed = WebConfigParser.parsePollResponse(bodyStr, code, base)
+                        if (parsed != null) {
+                            return@withContext Result.success(parsed)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        Result.failure(lastError ?: IOException("Сервер привязки недоступен"))
+    }
+
+    override suspend fun applyWebConfig(pageUrl: String, profileId: Long): Result<WebConfig> = withContext(Dispatchers.IO) {
+        val configResult = fetchWebConfig(pageUrl)
+        if (configResult.isFailure) {
+            return@withContext configResult
+        }
+        applySubmittedWebConfig(configResult.getOrThrow(), profileId)
+    }
+
+    override suspend fun applySubmittedWebConfig(webConfig: WebConfig, profileId: Long): Result<WebConfig> = withContext(Dispatchers.IO) {
+        try {
+            val cleanPlaylistUrl = Playlist.normalizeUrl(webConfig.playlistUrl)
+            val cleanEpgUrl = webConfig.epgUrl?.trim()?.takeIf { it.isNotBlank() }?.let { Playlist.normalizeUrl(it) }
+
+            val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+            editor.putString("web_config_url", webConfig.sourcePageUrl)
+            if (cleanEpgUrl != null) {
+                editor.putString("custom_epg_url", cleanEpgUrl)
+            }
+            editor.apply()
+
+            val existingPlaylists = playlistDao.getAll()
+            val matchingExisting = existingPlaylists.firstOrNull {
+                it.url.equals(cleanPlaylistUrl, ignoreCase = true) ||
+                    it.name.equals(webConfig.name, ignoreCase = true)
+            }
+
+            val targetPlaylist = if (matchingExisting != null) {
+                matchingExisting.toDomain().copy(
+                    name = webConfig.name.ifBlank { matchingExisting.name },
+                    url = cleanPlaylistUrl,
+                    epgUrl = cleanEpgUrl ?: matchingExisting.epgUrl,
+                )
+            } else {
+                Playlist(
+                    profileId = profileId,
+                    name = webConfig.name.ifBlank { "Minoga TV" },
+                    url = cleanPlaylistUrl,
+                    type = PlaylistType.M3U,
+                    epgUrl = cleanEpgUrl,
+                )
+            }
+
+            // Validate playlist availability first
+            val validation = validatePlaylistAvailability(targetPlaylist)
+            if (validation.isFailure) {
+                return@withContext Result.failure(
+                    validation.exceptionOrNull() ?: IOException("Ссылка на плейлист с веб-страницы недоступна: $cleanPlaylistUrl")
+                )
+            }
+
+            if (matchingExisting != null) {
+                updatePlaylist(targetPlaylist)
+            } else {
+                addPlaylist(targetPlaylist)
+            }
+
+            Result.success(
+                webConfig.copy(
+                    playlistUrl = cleanPlaylistUrl,
+                    epgUrl = cleanEpgUrl,
+                )
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -89,6 +90,8 @@ fun EpgSidePanel(
     channelName: String,
     onItemSelected: (SidePanelItem) -> Unit,
     modifier: Modifier = Modifier,
+    onItemFocused: (Int) -> Unit = {},
+    onHeaderActionClick: () -> Unit = {},
     isFocusInSidePanel: Boolean = true,
     isProgramDetailsOpen: Boolean = false,
     isLoadingEpg: Boolean = false,
@@ -121,13 +124,28 @@ fun EpgSidePanel(
                     channelName = channelName,
                     isFocusInSidePanel = isFocusInSidePanel,
                     isProgramDetailsOpen = isProgramDetailsOpen,
+                    scaleFactor = scaleFactor,
+                    onHeaderActionClick = onHeaderActionClick,
                 )
 
                 HorizontalDivider(color = DividerColor, thickness = 0.8.dp)
 
                 // ── EPG + Catch-up list & Details ─────────────────────────────
+                val isPortrait = LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
                 if (items.isEmpty()) {
                     EmptyPanelContent(isLoading = isLoadingEpg)
+                } else if (isProgramDetailsOpen && isPortrait) {
+                    // In portrait mode on a phone, show ProgramDetailsCard full-width instead of 35%/65% split
+                    ProgramDetailsCard(
+                        item = items.getOrNull(focusedIndex),
+                        channelName = channelName,
+                        scrollState = detailsScrollState,
+                        onBackClick = onHeaderActionClick,
+                        onPlayClick = { items.getOrNull(focusedIndex)?.let(onItemSelected) },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                    )
                 } else if (isProgramDetailsOpen) {
                     Row(
                         modifier = Modifier
@@ -145,13 +163,20 @@ fun EpgSidePanel(
                         ) {
                             itemsIndexed(items) { index, item ->
                                 val isFocused = isFocusInSidePanel && index == focusedIndex
+                                val handleRowClick = {
+                                    if (!isFocused) {
+                                        onItemFocused(index)
+                                    } else {
+                                        onItemSelected(item)
+                                    }
+                                }
                                 when (item) {
                                     is SidePanelItem.Programme ->
                                         ProgrammeRow(
                                             item = item,
                                             isFocused = isFocused,
                                             scaleFactor = scaleFactor,
-                                            onClick = { onItemSelected(item) },
+                                            onClick = handleRowClick,
                                         )
 
                                     is SidePanelItem.CatchupSlot ->
@@ -159,7 +184,7 @@ fun EpgSidePanel(
                                             item = item,
                                             isFocused = isFocused,
                                             scaleFactor = scaleFactor,
-                                            onClick = { onItemSelected(item) },
+                                            onClick = handleRowClick,
                                         )
                                 }
                             }
@@ -170,6 +195,8 @@ fun EpgSidePanel(
                             item = items.getOrNull(focusedIndex),
                             channelName = channelName,
                             scrollState = detailsScrollState,
+                            onBackClick = onHeaderActionClick,
+                            onPlayClick = { items.getOrNull(focusedIndex)?.let(onItemSelected) },
                             modifier = Modifier
                                 .weight(0.65f)
                                 .fillMaxHeight(),
@@ -185,13 +212,20 @@ fun EpgSidePanel(
                     ) {
                         itemsIndexed(items) { index, item ->
                             val isFocused = isFocusInSidePanel && index == focusedIndex
+                            val handleRowClick = {
+                                if (!isFocused) {
+                                    onItemFocused(index)
+                                } else {
+                                    onItemSelected(item)
+                                }
+                            }
                             when (item) {
                                 is SidePanelItem.Programme ->
                                     ProgrammeRow(
                                         item = item,
                                         isFocused = isFocused,
                                         scaleFactor = scaleFactor,
-                                        onClick = { onItemSelected(item) },
+                                        onClick = handleRowClick,
                                     )
 
                                 is SidePanelItem.CatchupSlot ->
@@ -199,7 +233,7 @@ fun EpgSidePanel(
                                         item = item,
                                         isFocused = isFocused,
                                         scaleFactor = scaleFactor,
-                                        onClick = { onItemSelected(item) },
+                                        onClick = handleRowClick,
                                     )
                             }
                         }
@@ -217,11 +251,17 @@ private fun PanelHeader(
     channelName: String,
     isFocusInSidePanel: Boolean,
     isProgramDetailsOpen: Boolean = false,
+    scaleFactor: Float = 1.0f,
+    onHeaderActionClick: () -> Unit = {},
 ) {
+    val isCompact = scaleFactor <= 0.65f
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(
+                horizontal = if (isCompact) 8.dp else 12.dp,
+                vertical = if (isCompact) 4.dp else 6.dp,
+            ),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -229,61 +269,75 @@ private fun PanelHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
                     imageVector = Icons.Outlined.LiveTv,
                     contentDescription = null,
                     tint = AccentColor,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(if (isCompact) 13.dp else 16.dp),
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(4.dp))
                 Text(
-                    text = "ТЕЛЕПРОГРАММА И АРХИВ",
-                    color = AccentColor,
-                    fontSize = 11.sp,
+                    text = if (isCompact && channelName.isNotBlank()) {
+                        "ПРОГРАММА • $channelName"
+                    } else {
+                        "ТЕЛЕПРОГРАММА И АРХИВ"
+                    },
+                    color = if (isCompact && channelName.isNotBlank()) TextPrimary else AccentColor,
+                    fontSize = if (isCompact) 10.5.sp else 11.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp,
+                    letterSpacing = 0.3.sp,
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
 
-            // Remote hint pill
+            // Remote hint pill (also clickable by touch)
             Surface(
                 shape = RoundedCornerShape(6.dp),
                 color = if (isFocusInSidePanel) Color(0x3300E5FF) else Color(0x1F8193B2),
                 border = BorderStroke(1.dp, if (isFocusInSidePanel) AccentColor else Color(0x338193B2)),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { onHeaderActionClick() },
             ) {
                 Text(
                     text = when {
-                        isProgramDetailsOpen -> "◀ / Back В список"
+                        isProgramDetailsOpen -> "◀ В список"
                         isFocusInSidePanel -> "▶ Инфо / ◀ Каналы"
                         else -> "▶ В программу"
                     },
                     color = if (isFocusInSidePanel) Color.White else TextSecondary,
-                    fontSize = 9.5.sp,
+                    fontSize = if (isCompact) 8.5.sp else 9.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     softWrap = false,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    modifier = Modifier.padding(
+                        horizontal = if (isCompact) 5.dp else 6.dp,
+                        vertical = if (isCompact) 1.5.dp else 2.dp,
+                    ),
                 )
             }
         }
 
-        Spacer(Modifier.height(2.dp))
+        if (!isCompact) {
+            Spacer(Modifier.height(2.dp))
 
-        Text(
-            text = channelName.ifBlank { "Выберите канал" },
-            color = TextPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis,
-        )
+            Text(
+                text = channelName.ifBlank { "Выберите канал" },
+                color = TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -296,6 +350,7 @@ private fun ProgrammeRow(
 ) {
     val bg = if (isFocused) SelectedItemBg else Color(0x55131825)
     val borderColor = if (isFocused) AccentColor else Color(0x1A00E5FF)
+    val isCompact = scaleFactor <= 0.65f
 
     Box(
         modifier = Modifier
@@ -303,13 +358,16 @@ private fun ProgrammeRow(
             .clip(RoundedCornerShape((6 * scaleFactor).coerceAtLeast(4f).dp))
             .background(bg)
             .border(
-                width = if (isFocused) 2.dp else 0.5.dp,
+                width = if (isFocused) 1.5.dp else 0.5.dp,
                 color = borderColor,
                 shape = RoundedCornerShape((6 * scaleFactor).coerceAtLeast(4f).dp),
             )
             .clickable { onClick() }
             .focusable()
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(
+                horizontal = if (isCompact) 6.dp else 8.dp,
+                vertical = if (isCompact) 2.dp else 3.dp,
+            ),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -319,38 +377,24 @@ private fun ProgrammeRow(
                 Box(
                     modifier = Modifier
                         .width(3.dp)
-                        .height(22.dp)
+                        .height(if (isCompact) 16.dp else 22.dp)
                         .clip(RoundedCornerShape(1.5.dp))
                         .background(AccentColor),
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(5.dp))
             }
             Column(modifier = Modifier.weight(1f)) {
                 // Line 1: Time + Live badge + Title
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     Text(
-                        text = timeFmt.format(Date(item.program.startMs)),
+                        text = "${timeFmt.format(Date(item.program.startMs))}–${timeFmt.format(Date(item.program.endMs))}",
                         color = if (item.isLive || isFocused) AccentColor else TextSecondary,
-                        fontSize = 10.5.sp,
+                        fontSize = if (isCompact) 9.5.sp else 10.5.sp,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                    Text(
-                        text = "–",
-                        color = TextSecondary,
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                    Text(
-                        text = timeFmt.format(Date(item.program.endMs)),
-                        color = TextSecondary,
-                        fontSize = 10.5.sp,
                         maxLines = 1,
                         softWrap = false,
                     )
@@ -361,7 +405,7 @@ private fun ProgrammeRow(
                     Text(
                         text = item.program.title,
                         color = if (isFocused) Color.White else TextPrimary,
-                        fontSize = 11.5.sp,
+                        fontSize = if (isCompact) 10.5.sp else 11.5.sp,
                         fontWeight = if (item.isLive || isFocused) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1,
                         softWrap = false,
@@ -370,13 +414,13 @@ private fun ProgrammeRow(
                     )
                 }
 
-                // Line 2: Abbreviated description (сокращенно информация о телепередаче)
+                // Line 2: Abbreviated description (shown always on TV scale, or on focused/live row in compact phone mode)
                 val sub = getProgramSubtitle(item.program)
-                if (sub.isNotEmpty()) {
+                if (sub.isNotEmpty() && (!isCompact || isFocused || item.isLive)) {
                     Text(
                         text = sub,
                         color = if (isFocused) Color(0xFFB0C4DE) else TextSecondary.copy(alpha = 0.8f),
-                        fontSize = 9.5.sp,
+                        fontSize = if (isCompact) 8.5.sp else 9.5.sp,
                         fontWeight = FontWeight.Normal,
                         maxLines = 1,
                         softWrap = false,
@@ -386,7 +430,7 @@ private fun ProgrammeRow(
 
                 // Live progress bar
                 if (item.isLive && item.progress > 0f) {
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(1.5.dp))
                     LinearProgressIndicator(
                         progress = { item.progress },
                         modifier = Modifier
@@ -411,6 +455,7 @@ private fun CatchupSlotRow(
 ) {
     val bg = if (isFocused) SelectedItemBg else Color(0x44131825)
     val borderColor = if (isFocused) AccentColor else Color(0x1A00E5FF)
+    val isCompact = scaleFactor <= 0.65f
 
     Box(
         modifier = Modifier
@@ -418,13 +463,16 @@ private fun CatchupSlotRow(
             .clip(RoundedCornerShape((6 * scaleFactor).coerceAtLeast(4f).dp))
             .background(bg)
             .border(
-                width = if (isFocused) 2.dp else 0.5.dp,
+                width = if (isFocused) 1.5.dp else 0.5.dp,
                 color = borderColor,
                 shape = RoundedCornerShape((6 * scaleFactor).coerceAtLeast(4f).dp),
             )
             .clickable { onClick() }
             .focusable()
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(
+                horizontal = if (isCompact) 6.dp else 8.dp,
+                vertical = if (isCompact) 2.dp else 3.dp,
+            ),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -434,23 +482,23 @@ private fun CatchupSlotRow(
                 Box(
                     modifier = Modifier
                         .width(3.dp)
-                        .height(22.dp)
+                        .height(if (isCompact) 16.dp else 22.dp)
                         .clip(RoundedCornerShape(1.5.dp))
                         .background(AccentColor),
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(5.dp))
             }
             Column(modifier = Modifier.weight(1f)) {
                 // Line 1: Time + Archive badge + Title
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     Text(
-                        text = "${timeFmt.format(Date(item.program.startMs))} – ${timeFmt.format(Date(item.program.endMs))}",
+                        text = "${timeFmt.format(Date(item.program.startMs))}–${timeFmt.format(Date(item.program.endMs))}",
                         color = if (isFocused) AccentColor else TextSecondary,
-                        fontSize = 10.5.sp,
+                        fontSize = if (isCompact) 9.5.sp else 10.5.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         softWrap = false,
@@ -462,9 +510,9 @@ private fun CatchupSlotRow(
                             .padding(horizontal = 3.dp, vertical = 0.5.dp),
                     ) {
                         Text(
-                            text = "АРХИВ",
+                            text = if (isCompact) "АРХ" else "АРХИВ",
                             color = ChannelDesignTokens.ArchiveBadgeText,
-                            fontSize = 8.sp,
+                            fontSize = if (isCompact) 7.5.sp else 8.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             softWrap = false,
@@ -474,7 +522,7 @@ private fun CatchupSlotRow(
                     Text(
                         text = item.program.title,
                         color = if (isFocused) Color.White else TextPrimary,
-                        fontSize = 11.5.sp,
+                        fontSize = if (isCompact) 10.5.sp else 11.5.sp,
                         fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1,
                         softWrap = false,
@@ -483,13 +531,13 @@ private fun CatchupSlotRow(
                     )
                 }
 
-                // Line 2: Abbreviated description (сокращенно информация о телепередаче)
+                // Line 2: Abbreviated description (shown always on TV scale, or on focused row in compact phone mode)
                 val sub = getProgramSubtitle(item.program)
-                if (sub.isNotEmpty()) {
+                if (sub.isNotEmpty() && (!isCompact || isFocused)) {
                     Text(
                         text = sub,
                         color = if (isFocused) Color(0xFFB0C4DE) else TextSecondary.copy(alpha = 0.8f),
-                        fontSize = 9.5.sp,
+                        fontSize = if (isCompact) 8.5.sp else 9.5.sp,
                         fontWeight = FontWeight.Normal,
                         maxLines = 1,
                         softWrap = false,
@@ -502,7 +550,7 @@ private fun CatchupSlotRow(
                     imageVector = Icons.Filled.PlayArrow,
                     contentDescription = "Play",
                     tint = AccentColor,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(if (isCompact) 14.dp else 16.dp),
                 )
             }
         }
@@ -515,6 +563,8 @@ private fun ProgramDetailsCard(
     channelName: String,
     modifier: Modifier = Modifier,
     scrollState: ScrollState = rememberScrollState(),
+    onBackClick: () -> Unit = {},
+    onPlayClick: () -> Unit = {},
 ) {
     if (item == null) {
         Box(
@@ -666,27 +716,35 @@ private fun ProgramDetailsCard(
 
         Spacer(Modifier.height(3.dp))
 
-        // Remote Navigation Hints
+        // Remote & Touch Navigation Actions
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(4.dp))
                 .background(Color(0x2600E5FF))
-                .padding(horizontal = 6.dp, vertical = 2.dp),
+                .padding(horizontal = 6.dp, vertical = 3.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "▲▼ Прокрутка • ◀ Назад",
+                text = "◀ К списку передач",
                 color = AccentColor,
-                fontSize = 9.sp,
+                fontSize = 9.5.sp,
                 fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable { onBackClick() }
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
             )
             Text(
-                text = "OK Воспроизвести",
+                text = "▶ Смотреть",
                 color = Color.White,
-                fontSize = 9.sp,
+                fontSize = 9.5.sp,
                 fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable { onPlayClick() }
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
             )
         }
     }

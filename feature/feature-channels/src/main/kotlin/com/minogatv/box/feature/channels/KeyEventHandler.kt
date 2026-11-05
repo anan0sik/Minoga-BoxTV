@@ -43,6 +43,7 @@ class KeyEventHandler(
     private val onIntent: (ChannelListIntent) -> Unit,
     private val onOpenSettings: () -> Unit = {},
     private val onScrollProgramDetails: ((Int) -> Unit)? = null,
+    private val folderGridColumnsProvider: () -> Int = { 4 },
 ) {
     private val longPressDetector = LongPressDetector(scope, longPressMs)
 
@@ -177,8 +178,9 @@ class KeyEventHandler(
                 state.viewMode == ScreenViewMode.FOLDERS -> {
                     val count = state.folders.size
                     val cur = state.focusedFolderIndex
-                    // In 4-column grid, move right if not at right edge
-                    if (count > 0 && cur % 4 < 3 && cur + 1 < count) {
+                    val cols = folderGridColumnsProvider().coerceAtLeast(1)
+                    // Move right if not at right edge of current row
+                    if (count > 0 && cur % cols < cols - 1 && cur + 1 < count) {
                         onIntent(ChannelListIntent.MoveFolderFocus(1))
                     }
                 }
@@ -204,8 +206,9 @@ class KeyEventHandler(
                 state.isSearchFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.GROUP_SELECTOR))
                 state.viewMode == ScreenViewMode.FOLDERS -> {
                     val cur = state.focusedFolderIndex
-                    // In 4-column grid, move left if not at left edge
-                    if (cur % 4 > 0) {
+                    val cols = folderGridColumnsProvider().coerceAtLeast(1)
+                    // Move left if not at left edge of current row
+                    if (cur % cols > 0) {
                         onIntent(ChannelListIntent.MoveFolderFocus(-1))
                     }
                 }
@@ -231,11 +234,11 @@ class KeyEventHandler(
                 state.topBarFocus != TopBarFocus.NONE -> Unit
                 state.viewMode == ScreenViewMode.FOLDERS -> {
                     val cur = state.focusedFolderIndex
-                    // In 4-column grid, step is 4
-                    if (cur < 4) {
+                    val cols = folderGridColumnsProvider().coerceAtLeast(1)
+                    if (cur < cols) {
                         onIntent(ChannelListIntent.FocusTopBar(TopBarFocus.SETTINGS))
                     } else {
-                        onIntent(ChannelListIntent.MoveFolderFocus(-4))
+                        onIntent(ChannelListIntent.MoveFolderFocus(-cols))
                     }
                 }
                 state.viewMode == ScreenViewMode.CHANNELS -> {
@@ -269,9 +272,9 @@ class KeyEventHandler(
                 state.viewMode == ScreenViewMode.FOLDERS -> {
                     val count = state.folders.size
                     val cur = state.focusedFolderIndex
-                    // In 4-column grid, step is 4
-                    if (cur + 4 < count) {
-                        onIntent(ChannelListIntent.MoveFolderFocus(4))
+                    val cols = folderGridColumnsProvider().coerceAtLeast(1)
+                    if (cur + cols < count) {
+                        onIntent(ChannelListIntent.MoveFolderFocus(cols))
                     } else if (cur < count - 1) {
                         onIntent(ChannelListIntent.MoveFolderFocus(count - 1 - cur))
                     }
@@ -374,9 +377,13 @@ class KeyEventHandler(
                     true
                 } else if (state.viewMode == ScreenViewMode.FOLDERS) {
                     longPressDetector.reset()
-                    val selectedFolder = state.folders.getOrNull(state.focusedFolderIndex)
-                    if (selectedFolder != null) {
-                        onIntent(ChannelListIntent.SelectFolder(selectedFolder))
+                    if (state.folders.isEmpty() && state.channels.isEmpty()) {
+                        onOpenSettings()
+                    } else {
+                        val selectedFolder = state.folders.getOrNull(state.focusedFolderIndex)
+                        if (selectedFolder != null) {
+                            onIntent(ChannelListIntent.SelectFolder(selectedFolder))
+                        }
                     }
                     true
                 } else {

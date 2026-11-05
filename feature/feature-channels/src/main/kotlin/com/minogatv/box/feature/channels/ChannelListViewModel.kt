@@ -249,6 +249,8 @@ class ChannelListViewModel @Inject constructor(
     fun onIntent(intent: ChannelListIntent) {
         when (intent) {
             is ChannelListIntent.MoveFocus          -> handleMoveFocus(intent.delta)
+            is ChannelListIntent.SelectChannelIndex -> handleSelectChannelIndex(intent.index)
+            is ChannelListIntent.SelectSidePanelIndex -> handleSelectSidePanelIndex(intent.index)
             is ChannelListIntent.MoveFolderFocus    -> moveFolderFocus(intent.delta)
             is ChannelListIntent.SelectFolder       -> selectFolder(intent.folder)
             is ChannelListIntent.ReturnToFolders    -> returnToFolders()
@@ -704,6 +706,40 @@ class ChannelListViewModel @Inject constructor(
 
         // Start live preview first, followed by EPG schedule request
         startLivePreviewTimer()
+    }
+
+    private fun handleSelectChannelIndex(index: Int) {
+        val channels = _uiState.value.channels
+        if (channels.isEmpty()) return
+        val newIndex = index.coerceIn(0, channels.lastIndex)
+        previewTimerJob?.cancel()
+        sidePanelJob?.cancel()
+        sidePanelFetchJob?.cancel()
+        _uiState.update {
+            it.copy(
+                focusedIndex = newIndex,
+                isFocusInSidePanel = false,
+                isProgramDetailsOpen = false,
+                topBarFocus = TopBarFocus.NONE,
+                livePreviewChannelId = null,
+                isSidePanelEpgLoading = true,
+            )
+        }
+        startLivePreviewTimer()
+    }
+
+    private fun handleSelectSidePanelIndex(index: Int) {
+        val items = _uiState.value.sidePanelItems
+        if (items.isEmpty()) return
+        val newIndex = index.coerceIn(0, items.lastIndex)
+        _uiState.update {
+            it.copy(
+                isSidePanelOpen = true,
+                isFocusInSidePanel = true,
+                sidePanelFocusedIndex = newIndex,
+                topBarFocus = TopBarFocus.NONE,
+            )
+        }
     }
 
     private fun handleMoveSidePanelFocus(delta: Int) {

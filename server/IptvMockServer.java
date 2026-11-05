@@ -4,34 +4,82 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * # IptvMockServer
  *
- * Lightweight, zero-dependency Mock IPTV Backend for "Minoga TV Box".
+ * Lightweight, zero-dependency Web Pairing & IPTV Server for "Minoga TV Box"
+ * (hosted on minogatvbox.duckdns.org).
  *
- * Endpoints:
- * - M3U Playlist: http://<ip>:8080/playlist.m3u
- * - Xtream Codes API: http://<ip>:8080/get.php?username=admin&password=admin
- * - XMLTV EPG: http://<ip>:8080/epg.xml
- * - Health Check: http://<ip>:8080/health
+ * Pairing Code Flow:
+ * 1. TV App opens "Загрузить с ВЕБ-страницы", generates a 4-digit code, and calls:
+ *    - POST /api/code/register  {"code": "4829"}
+ *    - GET  /api/code/poll?code=4829 (every 2s)
+ * 2. User opens http://minogatvbox.duckdns.org, enters code "4829":
+ *    - POST /api/code/verify    {"code": "4829"} -> unlocks Name, Playlist, EPG form
+ * 3. User fills Name, Playlist URL, EPG URL and submits:
+ *    - POST /api/code/submit    {"code": "4829", "name": "...", "playlistUrl": "...", "epgUrl": "..."}
+ * 4. Next poll from TV App receives status="READY" with the submitted links and installs them.
  */
 public class IptvMockServer {
 
-    private static final int PORT = 8080;
+    private static final int DEFAULT_PORT = 8080;
+    private static final long SESSION_TTL_MS = 30 * 60 * 1000L; // 30 minutes
+    private static final File WEB_DIR = new File("web");
+    private static final File INDEX_HTML_FILE = new File(WEB_DIR, "index.html");
+    private static final File CONFIG_JSON_FILE = new File(WEB_DIR, "config.json");
+
+    static class PairingSession {
+        final String code;
+        volatile String status; // "WAITING", "VERIFIED", "READY"
+        volatile String name = "";
+        volatile String playlistUrl = "";
+        volatile String epgUrl = "";
+        volatile long updatedAtMs = System.currentTimeMillis();
+
+        PairingSession(String code) {
+            this.code = code;
+            this.status = "WAITING";
+        }
+    }
+
+    private static final Map<String, PairingSession> CODE_SESSIONS = new ConcurrentHashMap<>();
 
     public static void main(String[] args) throws IOException {
-        HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", PORT), 0);
+        int port = DEFAULT_PORT;
+        if (args.length > 0) {
+            try {
+                port = Integer.parseInt(args[0]);
+            } catch (NumberFormatException ignored) {}
+        }
 
-        server.createContext("/", new M3uHandler());
+        HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
+
+        server.createContext("/", new WebPortalHandler());
+        server.createContext("/index.html", new WebPortalHandler());
+        server.createContext("/web", new WebPortalHandler());
+        server.createContext("/api/code/register", new CodeRegisterHandler());
+        server.createContext("/api/code/verify", new CodeVerifyHandler());
+        server.createContext("/api/code/submit", new CodeSubmitHandler());
+        server.createContext("/api/code/poll", new CodePollHandler());
+        server.createContext("/api/config", new ConfigApiHandler());
+        server.createContext("/config.json", new ConfigApiHandler());
         server.createContext("/playlist.m3u", new M3uHandler());
         server.createContext("/get.php", new M3uHandler());
         server.createContext("/epg.xml", new EpgHandler());
@@ -42,18 +90,265 @@ public class IptvMockServer {
         server.start();
 
         System.out.println("==================================================================");
-        System.out.println("  Minoga TV Box - Mock IPTV Backend Server STARTED!");
+        System.out.println("  Minoga TV Box - Web Pairing & IPTV Server STARTED!");
         System.out.println("==================================================================");
-        System.out.println("  Port: " + PORT + " (Bound to 0.0.0.0)");
-        System.out.println();
-        System.out.println("  M3U Playlist URLs to enter in Minoga Settings:");
-        System.out.println("  * Android Emulator:       http://10.0.2.2:" + PORT + "/playlist.m3u");
-        System.out.println("  * Xiaomi TV Box / Device: http://192.168.112.104:" + PORT + "/playlist.m3u");
-        System.out.println("  * Localhost / Browser:    http://localhost:" + PORT + "/playlist.m3u");
-        System.out.println();
-        System.out.println("  Xtream Codes Simulation:");
-        System.out.println("  * Server: http://10.0.2.2:" + PORT + " | User: admin | Pass: admin");
+        System.out.println("  Port: " + port + " (Bound to 0.0.0.0)");
+        System.out.println("  Web Page:     http://localhost:" + port + "/");
+        System.out.println("  Code Pairing: /api/code/register | /verify | /submit | /poll");
         System.out.println("==================================================================");
+    }
+
+    private static void cleanupExpiredSessions() {
+        long now = System.currentTimeMillis();
+        CODE_SESSIONS.entrySet().removeIf(e -> (now - e.getValue().updatedAtMs) > SESSION_TTL_MS);
+    }
+
+    // ─── 1. Register Code from TV App (POST /api/code/register) ─────────────────
+
+    static class CodeRegisterHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            log(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendCorsPreflight(exchange);
+                return;
+            }
+            cleanupExpiredSessions();
+
+            String body = readBody(exchange);
+            String code = extractJsonString(body, "code", "").replaceAll("\\D", "");
+            if (code.length() != 4) {
+                sendResponse(exchange, 400, "application/json; charset=utf-8",
+                        "{\"error\":\"Код должен состоять из 4 цифр\"}");
+                return;
+            }
+
+            PairingSession session = new PairingSession(code);
+            CODE_SESSIONS.put(code, session);
+
+            String resp = "{\"status\":\"WAITING\",\"code\":\"" + code + "\"}";
+            sendResponse(exchange, 200, "application/json; charset=utf-8", resp);
+        }
+    }
+
+    // ─── 2. Verify Code from Web Page (POST /api/code/verify) ───────────────────
+
+    static class CodeVerifyHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            log(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendCorsPreflight(exchange);
+                return;
+            }
+            cleanupExpiredSessions();
+
+            String body = readBody(exchange);
+            String code = extractJsonString(body, "code", "").replaceAll("\\D", "");
+            if (code.length() != 4) {
+                sendResponse(exchange, 400, "application/json; charset=utf-8",
+                        "{\"error\":\"Введите 4-значный цифровой код\"}");
+                return;
+            }
+
+            PairingSession session = CODE_SESSIONS.get(code);
+            if (session == null) {
+                sendResponse(exchange, 404, "application/json; charset=utf-8",
+                        "{\"error\":\"Код " + code + " не найден. Откройте окно «Загрузить с Веб-страницы» в приложении на ТВ.\"}");
+                return;
+            }
+
+            if ("WAITING".equals(session.status)) {
+                session.status = "VERIFIED";
+            }
+            session.updatedAtMs = System.currentTimeMillis();
+
+            String resp = "{\"status\":\"" + session.status + "\",\"code\":\"" + code + "\"}";
+            sendResponse(exchange, 200, "application/json; charset=utf-8", resp);
+        }
+    }
+
+    // ─── 3. Submit Name, Playlist & EPG from Web Page (POST /api/code/submit) ──
+
+    static class CodeSubmitHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            log(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendCorsPreflight(exchange);
+                return;
+            }
+            cleanupExpiredSessions();
+
+            String body = readBody(exchange);
+            String code = extractJsonString(body, "code", "").replaceAll("\\D", "");
+            String name = extractJsonString(body, "name", "Minoga TV").trim();
+            String playlistUrl = extractJsonString(body, "playlistUrl", "").trim();
+            String epgUrl = extractJsonString(body, "epgUrl", "http://epg.one/epg2.xml.gz").trim();
+
+            if (code.length() != 4) {
+                sendResponse(exchange, 400, "application/json; charset=utf-8",
+                        "{\"error\":\"Некорректный код привязки\"}");
+                return;
+            }
+            if (playlistUrl.isEmpty()) {
+                sendResponse(exchange, 400, "application/json; charset=utf-8",
+                        "{\"error\":\"Укажите ссылку на плейлист\"}");
+                return;
+            }
+
+            PairingSession session = CODE_SESSIONS.computeIfAbsent(code, PairingSession::new);
+            session.name = name.isEmpty() ? "Minoga TV" : name;
+            session.playlistUrl = playlistUrl;
+            session.epgUrl = epgUrl;
+            session.status = "READY";
+            session.updatedAtMs = System.currentTimeMillis();
+
+            // Also persist latest config to web/config.json as backup
+            try {
+                if (!WEB_DIR.exists()) WEB_DIR.mkdirs();
+                String savedJson = "{\n"
+                        + "  \"name\": \"" + escapeJson(session.name) + "\",\n"
+                        + "  \"playlistUrl\": \"" + escapeJson(session.playlistUrl) + "\",\n"
+                        + "  \"epgUrl\": \"" + escapeJson(session.epgUrl) + "\",\n"
+                        + "  \"updatedAt\": \"" + DateTimeFormatter.ISO_INSTANT.format(Instant.now()) + "\"\n"
+                        + "}\n";
+                Files.writeString(CONFIG_JSON_FILE.toPath(), savedJson, StandardCharsets.UTF_8);
+            } catch (Exception ignored) {}
+
+            String resp = "{\n"
+                    + "  \"status\": \"READY\",\n"
+                    + "  \"code\": \"" + escapeJson(code) + "\",\n"
+                    + "  \"name\": \"" + escapeJson(session.name) + "\",\n"
+                    + "  \"playlistUrl\": \"" + escapeJson(session.playlistUrl) + "\",\n"
+                    + "  \"epgUrl\": \"" + escapeJson(session.epgUrl) + "\"\n"
+                    + "}";
+            sendResponse(exchange, 200, "application/json; charset=utf-8", resp);
+        }
+    }
+
+    // ─── 4. Poll Code Status from TV App (GET /api/code/poll?code=XXXX) ─────────
+
+    static class CodePollHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            log(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendCorsPreflight(exchange);
+                return;
+            }
+            cleanupExpiredSessions();
+
+            String code = getQueryParam(exchange.getRequestURI(), "code").replaceAll("\\D", "");
+            if (code.length() != 4) {
+                sendResponse(exchange, 400, "application/json; charset=utf-8",
+                        "{\"error\":\"Invalid code parameter\"}");
+                return;
+            }
+
+            // Auto-register if TV polls directly
+            PairingSession session = CODE_SESSIONS.computeIfAbsent(code, PairingSession::new);
+            session.updatedAtMs = System.currentTimeMillis();
+
+            if ("READY".equals(session.status)) {
+                String resp = "{\n"
+                        + "  \"status\": \"READY\",\n"
+                        + "  \"code\": \"" + escapeJson(code) + "\",\n"
+                        + "  \"name\": \"" + escapeJson(session.name) + "\",\n"
+                        + "  \"playlistUrl\": \"" + escapeJson(session.playlistUrl) + "\",\n"
+                        + "  \"epgUrl\": \"" + escapeJson(session.epgUrl) + "\"\n"
+                        + "}";
+                // Remove consumed session so it's one-time use
+                CODE_SESSIONS.remove(code);
+                sendResponse(exchange, 200, "application/json; charset=utf-8", resp);
+            } else {
+                String resp = "{\"status\":\"" + session.status + "\",\"code\":\"" + escapeJson(code) + "\"}";
+                sendResponse(exchange, 200, "application/json; charset=utf-8", resp);
+            }
+        }
+    }
+
+    // ─── Web Portal Page Handler (GET / and /index.html) ────────────────────────
+
+    static class WebPortalHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            log(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendCorsPreflight(exchange);
+                return;
+            }
+            if (INDEX_HTML_FILE.exists()) {
+                String html = Files.readString(INDEX_HTML_FILE.toPath(), StandardCharsets.UTF_8);
+                sendResponse(exchange, 200, "text/html; charset=utf-8", html);
+            } else {
+                String fallback = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head>"
+                        + "<body><h1>Minoga TV Box Web Pairing</h1></body></html>";
+                sendResponse(exchange, 200, "text/html; charset=utf-8", fallback);
+            }
+        }
+    }
+
+    // ─── Legacy Config API Handler (GET/POST /api/config & /config.json) ────────
+
+    static class ConfigApiHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            log(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendCorsPreflight(exchange);
+                return;
+            }
+            if (CONFIG_JSON_FILE.exists()) {
+                String json = Files.readString(CONFIG_JSON_FILE.toPath(), StandardCharsets.UTF_8);
+                sendResponse(exchange, 200, "application/json; charset=utf-8", json);
+            } else {
+                String defaultJson = "{\n"
+                        + "  \"name\": \"Minoga TV\",\n"
+                        + "  \"playlistUrl\": \"http://minogatvbox.duckdns.org/playlist.m3u\",\n"
+                        + "  \"epgUrl\": \"http://epg.one/epg2.xml.gz\"\n"
+                        + "}";
+                sendResponse(exchange, 200, "application/json; charset=utf-8", defaultJson);
+            }
+        }
+    }
+
+    private static String readBody(HttpExchange exchange) throws IOException {
+        try (InputStream is = exchange.getRequestBody()) {
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private static String getQueryParam(URI uri, String key) {
+        String rawQuery = uri.getRawQuery();
+        if (rawQuery == null || rawQuery.isEmpty()) return "";
+        for (String pair : rawQuery.split("&")) {
+            int idx = pair.indexOf('=');
+            if (idx > 0) {
+                String k = pair.substring(0, idx);
+                String v = pair.substring(idx + 1);
+                if (key.equalsIgnoreCase(k)) {
+                    return v;
+                }
+            }
+        }
+        return "";
+    }
+
+    private static String extractJsonString(String json, String key, String fallback) {
+        Pattern p = Pattern.compile("\"" + Pattern.quote(key) + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
+        Matcher m = p.matcher(json);
+        if (m.find()) {
+            return m.group(1)
+                    .replace("\\\"", "\"")
+                    .replace("\\\\", "\\")
+                    .trim();
+        }
+        return fallback;
+    }
+
+    private static String escapeJson(String s) {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     // ─── M3U Playlist Handler ───────────────────────────────────────────────────
@@ -89,7 +384,7 @@ public class IptvMockServer {
                     + "#EXTINF:-1 tvg-id=\"dw_news\" tvg-name=\"DW English\" tvg-logo=\"https://upload.wikimedia.org/wikipedia/commons/thumb/6/67/Deutsche_Welle_logo.svg/320px-Deutsche_Welle_logo.svg.png\" group-title=\"News\",Deutsche Welle HD\n"
                     + "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/index.m3u8\n";
 
-            sendResponse(exchange, "application/x-mpegurl; charset=utf-8", m3u);
+            sendResponse(exchange, 200, "application/x-mpegurl; charset=utf-8", m3u);
         }
     }
 
@@ -165,7 +460,7 @@ public class IptvMockServer {
                     + "  </programme>\n"
                     + "</tv>\n";
 
-            sendResponse(exchange, "application/xml; charset=utf-8", xml);
+            sendResponse(exchange, 200, "application/xml; charset=utf-8", xml);
         }
     }
 
@@ -176,17 +471,26 @@ public class IptvMockServer {
         public void handle(HttpExchange exchange) throws IOException {
             log(exchange);
             String json = "{\"status\":\"ok\",\"channels\":8,\"uptime\":" + System.currentTimeMillis() + "}";
-            sendResponse(exchange, "application/json; charset=utf-8", json);
+            sendResponse(exchange, 200, "application/json; charset=utf-8", json);
         }
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────
 
-    private static void sendResponse(HttpExchange exchange, String contentType, String body) throws IOException {
+    private static void sendCorsPreflight(HttpExchange exchange) throws IOException {
+        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
+        exchange.sendResponseHeaders(204, -1);
+        exchange.close();
+    }
+
+    private static void sendResponse(HttpExchange exchange, int statusCode, String contentType, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", contentType);
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseHeaders().set("Cache-Control", "no-store, no-cache, must-revalidate");
+        exchange.sendResponseHeaders(statusCode, bytes.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(bytes);
         }

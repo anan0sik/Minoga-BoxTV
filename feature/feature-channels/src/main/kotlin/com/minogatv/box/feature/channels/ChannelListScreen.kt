@@ -14,10 +14,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
+import androidx.compose.runtime.rememberUpdatedState
+import com.minogatv.box.feature.ui.LocalScreenKeyDispatcher
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,6 +86,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -169,6 +174,9 @@ fun ChannelListScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val listFocusRequester = remember { FocusRequester() }
     val sidePanelFocusRequester = remember { FocusRequester() }
+    val rootFocusRequester = remember { FocusRequester() }
+    val screenKeyDispatcher = LocalScreenKeyDispatcher.current
+    val currentUiState by rememberUpdatedState(uiState)
 
     // ── Live Preview background player (muted, low overhead, hardware codec safe) ──
     val previewPlayer = remember(context) {
@@ -196,12 +204,21 @@ fun ChannelListScreen(
             }
     }
 
-    val prefs = remember { context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE) }
-    var uiScalePercent by remember { mutableStateOf(prefs.getInt("ui_scale_percent", 100)) }
+    val prefs = remember {
+        context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE).also { sp ->
+            if (!sp.getBoolean("ui_scale_default_40_applied", false)) {
+                sp.edit()
+                    .putInt("ui_scale_percent", 40)
+                    .putBoolean("ui_scale_default_40_applied", true)
+                    .apply()
+            }
+        }
+    }
+    var uiScalePercent by remember { mutableStateOf(prefs.getInt("ui_scale_percent", 40)) }
     androidx.compose.runtime.DisposableEffect(prefs) {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == "ui_scale_percent") {
-                uiScalePercent = prefs.getInt("ui_scale_percent", 100)
+                uiScalePercent = prefs.getInt("ui_scale_percent", 40)
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
@@ -210,6 +227,10 @@ fun ChannelListScreen(
         }
     }
     val scaleFactor = (uiScalePercent / 100f).coerceIn(0.4f, 1.0f)
+    val configuration = LocalConfiguration.current
+    val isPortrait = configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+    val isCompactScreen = isPortrait || configuration.screenHeightDp < 500 || configuration.screenWidthDp < 750
+    val currentFolderCols by rememberUpdatedState(if (isPortrait) 2 else 4)
 
     // Release hardware codecs on lifecycle pause/stop so fullscreen player doesn't crash
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -282,6 +303,7 @@ fun ChannelListScreen(
                     detailsScrollState.animateScrollTo(target)
                 }
             },
+            folderGridColumnsProvider = { currentFolderCols },
         )
     }
 
@@ -326,12 +348,35 @@ fun ChannelListScreen(
         }
     }
 
-    // ── Transfer focus when side panel opens/closes
-    LaunchedEffect(uiState.isFocusInSidePanel) {
-        if (uiState.isFocusInSidePanel) {
-            sidePanelFocusRequester.requestFocus()
-        } else {
-            listFocusRequester.requestFocus()
+    // ── Register screen key handler so D-Pad & gesture keys work even in InputMode.Touch
+    DisposableEffect(screenKeyDispatcher, keyHandler) {
+        val handler: (KeyEvent) -> Boolean = { event ->
+            val state = currentUiState
+            if (state.isSearchOpen || state.pendingPinFolder != null || state.isExitConfirmOpen || state.isContextMenuOpen) {
+                false
+            } else {
+                keyHandler.onKeyEvent(event, state)
+            }
+        }
+        screenKeyDispatcher?.activeHandler = handler
+        onDispose {
+            if (screenKeyDispatcher?.activeHandler === handler) {
+                screenKeyDispatcher.activeHandler = null
+            }
+        }
+    }
+
+    // ── Transfer focus when side panel opens/closes or view mode changes
+    LaunchedEffect(uiState.isFocusInSidePanel, uiState.viewMode, uiState.channels.isEmpty()) {
+        runCatching {
+            when {
+                uiState.viewMode == ScreenViewMode.CHANNELS && uiState.isFocusInSidePanel ->
+                    sidePanelFocusRequester.requestFocus()
+                uiState.viewMode == ScreenViewMode.CHANNELS && uiState.channels.isNotEmpty() ->
+                    listFocusRequester.requestFocus()
+                else ->
+                    rootFocusRequester.requestFocus()
+            }
         }
     }
 
@@ -340,6 +385,8 @@ fun ChannelListScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(ChannelDesignTokens.BackgroundGradient)
+            .focusRequester(rootFocusRequester)
+            .focusable()
             .onPreviewKeyEvent { keyEvent ->
                 keyHandler.onKeyEvent(keyEvent.nativeKeyEvent, uiState)
             },
@@ -360,6 +407,8 @@ fun ChannelListScreen(
                 isSettingsFocused = uiState.isSettingsFocused,
                 isSearchFocused = uiState.isSearchFocused,
                 isGroupFocused = uiState.isGroupFocused,
+                isCompact = isCompactScreen,
+                isPortrait = isPortrait,
                 onSearchClick = { viewModel.onIntent(ChannelListIntent.OpenSearch) },
                 onSettingsClick = onNavigateToSettings,
                 onBackToFoldersClick = { viewModel.onIntent(ChannelListIntent.ReturnToFolders) },
@@ -453,9 +502,10 @@ fun ChannelListScreen(
                     )
                 }
             } else if (uiState.viewMode == ScreenViewMode.FOLDERS) {
-                // Окно 1: Сетка тематических папок (Stitch Category Grid)
+                // Окно 1: Сетка тематических папок (Stitch Category Grid — 2 колонки в портрете, 4 в ландшафте)
                 FolderGrid(
                     uiState = uiState,
+                    columnsCount = if (isPortrait) 2 else 4,
                     onFolderClick = { folder ->
                         viewModel.onIntent(ChannelListIntent.SelectFolder(folder))
                     },
@@ -463,46 +513,233 @@ fun ChannelListScreen(
                         .weight(1f)
                         .fillMaxWidth(),
                 )
+            } else if (isPortrait) {
+                // Окно 2 (Портретный режим для смартфона):
+                // Верх: 16:9 Живое превью во всю ширину
+                // Середина: Вкладки [📺 Каналы] | [📅 Программа и Архив]
+                // Низ: Полноширинный список каналов ИЛИ телепрограммы
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    StitchLivePreviewCard(
+                        uiState = uiState,
+                        previewPlayer = previewPlayer,
+                        isCompact = true,
+                        onPlayLive = { channelId -> navigateToPlayerSafe(channelId, null) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (uiState.isProgramDetailsOpen) 88.dp else 132.dp),
+                    )
+
+                    // Переключатель вкладок: Каналы / Телепрограмма и Архив
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xCC0D1322))
+                            .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(10.dp))
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        val isChannelsTab = !uiState.isFocusInSidePanel
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isChannelsTab) Color(0x3300E5FF) else Color.Transparent)
+                                .border(
+                                    width = if (isChannelsTab) 1.dp else 0.dp,
+                                    color = if (isChannelsTab) ChannelDesignTokens.NeonCyan else Color.Transparent,
+                                    shape = RoundedCornerShape(8.dp),
+                                )
+                                .clickable {
+                                    if (uiState.isProgramDetailsOpen) {
+                                        viewModel.onIntent(ChannelListIntent.CloseProgramDetails)
+                                    }
+                                    if (uiState.isFocusInSidePanel) {
+                                        viewModel.onIntent(ChannelListIntent.CloseEpgSidePanel)
+                                    }
+                                }
+                                .padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "📺 Каналы (${uiState.channels.size})",
+                                color = if (isChannelsTab) Color.White else TextSecondary,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isChannelsTab) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+
+                        val isEpgTab = uiState.isFocusInSidePanel
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isEpgTab) Color(0x3300E5FF) else Color.Transparent)
+                                .border(
+                                    width = if (isEpgTab) 1.dp else 0.dp,
+                                    color = if (isEpgTab) ChannelDesignTokens.NeonCyan else Color.Transparent,
+                                    shape = RoundedCornerShape(8.dp),
+                                )
+                                .clickable {
+                                    viewModel.onIntent(ChannelListIntent.OpenEpgSidePanel)
+                                }
+                                .padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "📅 Программа и Архив (${uiState.sidePanelItems.size})",
+                                color = if (isEpgTab) Color.White else TextSecondary,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isEpgTab) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
+
+                    // Контент активной вкладки во всю ширину экрана
+                    if (!uiState.isFocusInSidePanel) {
+                        ChannelList(
+                            uiState = uiState,
+                            listFocusRequester = listFocusRequester,
+                            scaleFactor = scaleFactor,
+                            onChannelSelect = { index ->
+                                viewModel.onIntent(ChannelListIntent.SelectChannelIndex(index))
+                            },
+                            onChannelClick = { channelId ->
+                                navigateToPlayerSafe(channelId, null)
+                            },
+                            onChannelLongClick = { index, channelId ->
+                                viewModel.onIntent(ChannelListIntent.SelectChannelIndex(index))
+                                viewModel.onIntent(ChannelListIntent.OpenContextMenu(channelId))
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                        )
+                    } else {
+                        EpgSidePanel(
+                            isVisible = true,
+                            items = uiState.sidePanelItems,
+                            focusedIndex = uiState.sidePanelFocusedIndex,
+                            channelName = uiState.channels
+                                .getOrNull(uiState.focusedIndex)?.channel?.name ?: "",
+                            isFocusInSidePanel = uiState.isFocusInSidePanel,
+                            isProgramDetailsOpen = uiState.isProgramDetailsOpen,
+                            isLoadingEpg = uiState.isSidePanelEpgLoading,
+                            scaleFactor = scaleFactor,
+                            detailsScrollState = detailsScrollState,
+                            onItemFocused = { idx ->
+                                viewModel.onIntent(ChannelListIntent.SelectSidePanelIndex(idx))
+                            },
+                            onHeaderActionClick = {
+                                when {
+                                    uiState.isProgramDetailsOpen ->
+                                        viewModel.onIntent(ChannelListIntent.CloseProgramDetails)
+                                    uiState.isFocusInSidePanel ->
+                                        viewModel.onIntent(ChannelListIntent.OpenProgramDetails)
+                                    uiState.sidePanelItems.isNotEmpty() ->
+                                        viewModel.onIntent(ChannelListIntent.OpenEpgSidePanel)
+                                }
+                            },
+                            onItemSelected = { item ->
+                                val currentItem = uiState.channels.getOrNull(uiState.focusedIndex) ?: return@EpgSidePanel
+                                val channelId = currentItem.channel.id
+                                when (item) {
+                                    is SidePanelItem.Programme -> {
+                                        if (item.program.endMs <= System.currentTimeMillis()) {
+                                            if (currentItem.hasCatchup) {
+                                                navigateToPlayerSafe(channelId, item.program.startMs)
+                                            } else {
+                                                viewModel.onIntent(ChannelListIntent.OpenProgramDetails)
+                                            }
+                                        } else if (item.isLive) {
+                                            navigateToPlayerSafe(channelId, null)
+                                        } else {
+                                            viewModel.onIntent(ChannelListIntent.OpenProgramDetails)
+                                        }
+                                    }
+                                    is SidePanelItem.CatchupSlot -> {
+                                        if (currentItem.hasCatchup) {
+                                            onNavigateToPlayer(channelId, item.program.startMs)
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .focusRequester(sidePanelFocusRequester),
+                        )
+                    }
+                }
             } else {
-                // Окно 2: Двухпанельный ТВ-макет (42% каналы / 58% превью и архив)
+                // Окно 2: Двухпанельный ТВ-макет (адаптивный для смартфонов и ТВ)
+                val previewHeight = when {
+                    isCompactScreen && uiState.isProgramDetailsOpen -> 52.dp
+                    isCompactScreen -> 68.dp
+                    uiState.isProgramDetailsOpen -> (120 * scaleFactor).coerceAtLeast(64f).dp
+                    else -> (170 * scaleFactor).coerceAtLeast(84f).dp
+                }
                 Row(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        .padding(
+                            horizontal = if (isCompactScreen) 8.dp else 16.dp,
+                            vertical = if (isCompactScreen) 3.dp else 6.dp,
+                        ),
+                    horizontalArrangement = Arrangement.spacedBy(if (isCompactScreen) 8.dp else 16.dp),
                 ) {
                     // ── Левая колонка: Список каналов с фокусом и бейджами ──
                     ChannelList(
                         uiState = uiState,
                         listFocusRequester = listFocusRequester,
                         scaleFactor = scaleFactor,
+                        onChannelSelect = { index ->
+                            viewModel.onIntent(ChannelListIntent.SelectChannelIndex(index))
+                        },
                         onChannelClick = { channelId ->
                             if (uiState.isFocusInSidePanel) {
                                 viewModel.onIntent(ChannelListIntent.CloseEpgSidePanel)
                             }
                             navigateToPlayerSafe(channelId, null)
                         },
+                        onChannelLongClick = { index, channelId ->
+                            viewModel.onIntent(ChannelListIntent.SelectChannelIndex(index))
+                            viewModel.onIntent(ChannelListIntent.OpenContextMenu(channelId))
+                        },
                         modifier = Modifier
-                            .weight(if (uiState.isProgramDetailsOpen) 0.30f else 0.42f)
+                            .weight(if (uiState.isProgramDetailsOpen) 0.34f else 0.46f)
                             .fillMaxHeight(),
                     )
 
                     // ── Правая колонка: 16:9 Живое Превью + Телепрограмма и архив ──
                     Column(
                         modifier = Modifier
-                            .weight(if (uiState.isProgramDetailsOpen) 0.70f else 0.58f)
+                            .weight(if (uiState.isProgramDetailsOpen) 0.66f else 0.54f)
                             .fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(if (uiState.isProgramDetailsOpen) 6.dp else 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(
+                            if (isCompactScreen || uiState.isProgramDetailsOpen) 4.dp else 10.dp
+                        ),
                     ) {
-                        // 16:9 Мини-плеер живого превью
+                        // 16:9 Мини-плеер живого превью (уменьшенный для экрана смартфона)
                         StitchLivePreviewCard(
                             uiState = uiState,
                             previewPlayer = previewPlayer,
+                            isCompact = isCompactScreen || scaleFactor <= 0.65f,
                             onPlayLive = { channelId -> navigateToPlayerSafe(channelId, null) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(if (uiState.isProgramDetailsOpen) 120.dp else 170.dp),
+                                .height(previewHeight),
                         )
 
                         // Телепрограмма и архив выбранного канала
@@ -517,6 +754,19 @@ fun ChannelListScreen(
                             isLoadingEpg = uiState.isSidePanelEpgLoading,
                             scaleFactor = scaleFactor,
                             detailsScrollState = detailsScrollState,
+                            onItemFocused = { idx ->
+                                viewModel.onIntent(ChannelListIntent.SelectSidePanelIndex(idx))
+                            },
+                            onHeaderActionClick = {
+                                when {
+                                    uiState.isProgramDetailsOpen ->
+                                        viewModel.onIntent(ChannelListIntent.CloseProgramDetails)
+                                    uiState.isFocusInSidePanel ->
+                                        viewModel.onIntent(ChannelListIntent.OpenProgramDetails)
+                                    uiState.sidePanelItems.isNotEmpty() ->
+                                        viewModel.onIntent(ChannelListIntent.OpenEpgSidePanel)
+                                }
+                            },
                             onItemSelected = { item ->
                                 val currentItem = uiState.channels.getOrNull(uiState.focusedIndex) ?: return@EpgSidePanel
                                 val channelId = currentItem.channel.id
@@ -525,9 +775,13 @@ fun ChannelListScreen(
                                         if (item.program.endMs <= System.currentTimeMillis()) {
                                             if (currentItem.hasCatchup) {
                                                 navigateToPlayerSafe(channelId, item.program.startMs)
+                                            } else {
+                                                viewModel.onIntent(ChannelListIntent.OpenProgramDetails)
                                             }
-                                        } else {
+                                        } else if (item.isLive) {
                                             navigateToPlayerSafe(channelId, null)
+                                        } else {
+                                            viewModel.onIntent(ChannelListIntent.OpenProgramDetails)
                                         }
                                     }
                                     is SidePanelItem.CatchupSlot -> {
@@ -546,36 +800,73 @@ fun ChannelListScreen(
                 }
             }
 
-            // ── Remote control guide bar ──────────────────────────────────────
+            // ── Remote control guide bar (also tappable on touch screens) ─────
+            val focusedChannelId = uiState.channels.getOrNull(uiState.focusedIndex)?.channel?.id
             val hints = if (uiState.viewMode == ScreenViewMode.FOLDERS) {
                 listOf(
                     RemoteHint("◄▲▼►", "Папки"),
-                    RemoteHint("OK", "Открыть"),
-                    RemoteHint("🔍", "Поиск"),
-                    RemoteHint("▲ Вверх", "Настройки ⚙"),
+                    RemoteHint("OK", "Открыть") {
+                        if (uiState.folders.isEmpty() && uiState.channels.isEmpty()) {
+                            onNavigateToSettings()
+                        } else {
+                            uiState.folders.getOrNull(uiState.focusedFolderIndex)?.let {
+                                viewModel.onIntent(ChannelListIntent.SelectFolder(it))
+                            }
+                        }
+                    },
+                    RemoteHint("🔍", "Поиск") {
+                        viewModel.onIntent(ChannelListIntent.OpenSearch)
+                    },
+                    RemoteHint("⚙", "Настройки") {
+                        onNavigateToSettings()
+                    },
                 )
             } else if (uiState.isProgramDetailsOpen) {
                 listOf(
                     RemoteHint("▲▼", "Прокрутка"),
-                    RemoteHint("OK", "Смотреть / Архив"),
-                    RemoteHint("◀ / Back", "К передачам"),
-                    RemoteHint("🔴", "Избранное", keyColor = Color(0xFFFF5252)),
+                    RemoteHint("OK", "Смотреть / Архив") {
+                        focusedChannelId?.let { navigateToPlayerSafe(it, null) }
+                    },
+                    RemoteHint("◀ / Back", "К передачам") {
+                        viewModel.onIntent(ChannelListIntent.CloseProgramDetails)
+                    },
+                    RemoteHint("🔴", "Избранное", keyColor = Color(0xFFFF5252)) {
+                        focusedChannelId?.let { viewModel.onIntent(ChannelListIntent.ToggleFavorite(it)) }
+                    },
                 )
             } else if (uiState.isFocusInSidePanel) {
                 listOf(
                     RemoteHint("▲▼", "Передачи"),
-                    RemoteHint("▶", "Инфо"),
-                    RemoteHint("OK", "Смотреть / Архив"),
-                    RemoteHint("◀", "Каналы"),
-                    RemoteHint("🔴", "Избранное", keyColor = Color(0xFFFF5252)),
+                    RemoteHint("▶", "Инфо") {
+                        viewModel.onIntent(ChannelListIntent.OpenProgramDetails)
+                    },
+                    RemoteHint("OK", "Смотреть / Архив") {
+                        focusedChannelId?.let { navigateToPlayerSafe(it, null) }
+                    },
+                    RemoteHint("◀", "Каналы") {
+                        viewModel.onIntent(ChannelListIntent.CloseEpgSidePanel)
+                    },
+                    RemoteHint("🔴", "Избранное", keyColor = Color(0xFFFF5252)) {
+                        focusedChannelId?.let { viewModel.onIntent(ChannelListIntent.ToggleFavorite(it)) }
+                    },
                 )
             } else {
                 listOf(
                     RemoteHint("▲▼", "Каналы"),
-                    RemoteHint("OK", "Смотреть"),
-                    RemoteHint("◀", "Папки"),
-                    RemoteHint("▶", "Программа"),
-                    RemoteHint("🔴", "Избранное", keyColor = Color(0xFFFF5252)),
+                    RemoteHint("OK", "Смотреть") {
+                        focusedChannelId?.let { navigateToPlayerSafe(it, null) }
+                    },
+                    RemoteHint("◀", "Папки") {
+                        viewModel.onIntent(ChannelListIntent.ReturnToFolders)
+                    },
+                    RemoteHint("▶", "Программа") {
+                        if (uiState.sidePanelItems.isNotEmpty()) {
+                            viewModel.onIntent(ChannelListIntent.OpenEpgSidePanel)
+                        }
+                    },
+                    RemoteHint("🔴", "Избранное", keyColor = Color(0xFFFF5252)) {
+                        focusedChannelId?.let { viewModel.onIntent(ChannelListIntent.ToggleFavorite(it)) }
+                    },
                 )
             }
             RemoteControlHintBar(hints = hints)
@@ -672,7 +963,9 @@ private fun ChannelList(
     uiState: ChannelListUiState,
     listFocusRequester: FocusRequester,
     scaleFactor: Float = 1.0f,
+    onChannelSelect: (Int) -> Unit = {},
     onChannelClick: (Long) -> Unit = {},
+    onChannelLongClick: (Int, Long) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     if (uiState.channels.isEmpty()) {
@@ -711,20 +1004,29 @@ private fun ChannelList(
         modifier = modifier
             .focusRequester(listFocusRequester)
             .focusable()
-            .padding(horizontal = 16.dp, vertical = (6 * scaleFactor).coerceAtLeast(2f).dp),
-        verticalArrangement = Arrangement.spacedBy((6 * scaleFactor).coerceAtLeast(2f).dp),
+            .padding(horizontal = 2.dp, vertical = (4 * scaleFactor).coerceAtLeast(2f).dp),
+        verticalArrangement = Arrangement.spacedBy((5 * scaleFactor).coerceAtLeast(2f).dp),
     ) {
         itemsIndexed(
             items = uiState.channels,
             key = { _, item -> item.channel.id },
         ) { index, item ->
+            val isChannelFocused = index == uiState.focusedIndex && !uiState.isFocusInSidePanel && uiState.topBarFocus == TopBarFocus.NONE
             ChannelListItem(
                 item = item,
                 index = index,
-                isFocused = index == uiState.focusedIndex && !uiState.isFocusInSidePanel && uiState.topBarFocus == TopBarFocus.NONE,
+                isFocused = isChannelFocused,
                 hasLivePreview = uiState.livePreviewChannelId == item.channel.id,
                 scaleFactor = scaleFactor,
-                onClick = { onChannelClick(item.channel.id) },
+                onClick = {
+                    if (isChannelFocused) {
+                        onChannelClick(item.channel.id)
+                    } else {
+                        onChannelSelect(index)
+                    }
+                },
+                onDoubleClick = { onChannelClick(item.channel.id) },
+                onLongClick = { onChannelLongClick(index, item.channel.id) },
             )
         }
     }
@@ -732,6 +1034,7 @@ private fun ChannelList(
 
 // ─── Channel list item ────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChannelListItem(
     item: ChannelDisplayItem,
@@ -740,13 +1043,19 @@ private fun ChannelListItem(
     hasLivePreview: Boolean,
     scaleFactor: Float = 1.0f,
     onClick: () -> Unit = {},
+    onDoubleClick: () -> Unit = onClick,
+    onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .tvFocusCard(isFocused = isFocused, cornerRadius = (14 * scaleFactor).coerceAtLeast(8f).dp)
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onDoubleClick = onDoubleClick,
+                onLongClick = onLongClick,
+            ),
         color = Color.Transparent,
     ) {
         Row(
@@ -769,25 +1078,27 @@ private fun ChannelListItem(
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.padding(
-                        start = (10 * scaleFactor).coerceAtLeast(4f).dp,
-                        end = (14 * scaleFactor).coerceAtLeast(6f).dp,
-                        top = (10 * scaleFactor).coerceAtLeast(3f).dp,
-                        bottom = (10 * scaleFactor).coerceAtLeast(3f).dp,
+                        start = (8 * scaleFactor).coerceAtLeast(4f).dp,
+                        end = (10 * scaleFactor).coerceAtLeast(5f).dp,
+                        top = (8 * scaleFactor).coerceAtLeast(3f).dp,
+                        bottom = (8 * scaleFactor).coerceAtLeast(3f).dp,
                     ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // ── Channel Number Pill (Concept 2 style)
                     Box(
                         modifier = Modifier
-                            .width((36 * scaleFactor).coerceAtLeast(20f).dp)
-                            .padding(end = (4 * scaleFactor).coerceAtLeast(2f).dp),
+                            .width((28 * scaleFactor).coerceAtLeast(18f).dp)
+                            .padding(end = (3 * scaleFactor).coerceAtLeast(2f).dp),
                         contentAlignment = Alignment.CenterStart,
                     ) {
                         Text(
                             text = String.format(Locale.US, "%02d", index + 1),
                             color = if (isFocused) ChannelDesignTokens.NeonCyan else ChannelDesignTokens.TextMuted,
-                            fontSize = if (isFocused) (17 * scaleFactor).coerceAtLeast(10f).sp else (16 * scaleFactor).coerceAtLeast(9f).sp,
+                            fontSize = if (isFocused) (15 * scaleFactor).coerceAtLeast(9.5f).sp else (14 * scaleFactor).coerceAtLeast(9f).sp,
                             fontWeight = if (isFocused) FontWeight.Black else FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
                         )
                     }
 
@@ -795,23 +1106,24 @@ private fun ChannelListItem(
                     ChannelLogo(
                         logoUrl = item.channel.logoUrl,
                         isFocused = isFocused,
-                        size = ((if (isFocused) 52 else 44) * scaleFactor).coerceAtLeast(24f).dp,
+                        size = ((if (isFocused) 44 else 38) * scaleFactor).coerceAtLeast(22f).dp,
                     )
 
-                    Spacer(Modifier.width((14 * scaleFactor).coerceAtLeast(6f).dp))
+                    Spacer(Modifier.width((10 * scaleFactor).coerceAtLeast(5f).dp))
 
                     // ── Name + EPG info
                     Column(modifier = Modifier.weight(1f)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy((8 * scaleFactor).coerceAtLeast(4f).dp),
+                            horizontalArrangement = Arrangement.spacedBy((6 * scaleFactor).coerceAtLeast(3f).dp),
                         ) {
                             Text(
                                 text = item.channel.name,
                                 color = if (isFocused) Color.White else TextPrimary,
-                                fontSize = if (isFocused) (17 * scaleFactor).coerceAtLeast(10f).sp else (16 * scaleFactor).coerceAtLeast(9f).sp,
+                                fontSize = if (isFocused) (16 * scaleFactor).coerceAtLeast(10.5f).sp else (15 * scaleFactor).coerceAtLeast(10f).sp,
                                 fontWeight = if (isFocused) FontWeight.Bold else FontWeight.SemiBold,
                                 maxLines = 1,
+                                softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false),
                             )
@@ -819,27 +1131,29 @@ private fun ChannelListItem(
                         // Catch-up badge
                         if (item.hasCatchup) {
                             Surface(
-                                shape = RoundedCornerShape(4.dp),
+                                shape = RoundedCornerShape(3.dp),
                                 color = Color(0x2E10B981),
-                                border = BorderStroke(1.dp, Color(0x8010B981)),
+                                border = BorderStroke(0.8.dp, Color(0x8010B981)),
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = (5 * scaleFactor).coerceAtLeast(3f).dp, vertical = (2 * scaleFactor).coerceAtLeast(1f).dp),
+                                    modifier = Modifier.padding(horizontal = (4 * scaleFactor).coerceAtLeast(2.5f).dp, vertical = (1.5f * scaleFactor).coerceAtLeast(0.5f).dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                                 ) {
                                     Icon(
                                         imageVector = Icons.Outlined.Archive,
                                         contentDescription = "Catch-up available",
                                         tint = Color(0xFF10B981),
-                                        modifier = Modifier.size((11 * scaleFactor).coerceAtLeast(8f).dp),
+                                        modifier = Modifier.size((10 * scaleFactor).coerceAtLeast(7.5f).dp),
                                     )
                                     Text(
-                                        text = "АРХИВ",
+                                        text = if (scaleFactor <= 0.65f) "АРХ" else "АРХИВ",
                                         color = Color(0xFF10B981),
-                                        fontSize = (9 * scaleFactor).coerceAtLeast(7f).sp,
+                                        fontSize = (8.5f * scaleFactor).coerceAtLeast(6.5f).sp,
                                         fontWeight = FontWeight.Bold,
-                                        letterSpacing = 0.5.sp,
+                                        letterSpacing = 0.3.sp,
+                                        maxLines = 1,
+                                        softWrap = false,
                                     )
                                 }
                             }
@@ -848,16 +1162,18 @@ private fun ChannelListItem(
                         // Live Preview badge
                         if (hasLivePreview) {
                             Surface(
-                                shape = RoundedCornerShape(4.dp),
+                                shape = RoundedCornerShape(3.dp),
                                 color = ChannelDesignTokens.NeonCyan.copy(alpha = 0.2f),
-                                border = BorderStroke(1.dp, ChannelDesignTokens.NeonCyan.copy(alpha = 0.6f)),
+                                border = BorderStroke(0.8.dp, ChannelDesignTokens.NeonCyan.copy(alpha = 0.6f)),
                             ) {
                                 Text(
-                                    text = "● PREVIEW",
+                                    text = if (scaleFactor <= 0.65f) "● LIVE" else "● PREVIEW",
                                     color = ChannelDesignTokens.NeonCyan,
-                                    fontSize = (9 * scaleFactor).coerceAtLeast(7f).sp,
+                                    fontSize = (8.5f * scaleFactor).coerceAtLeast(6.5f).sp,
                                     fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = (4 * scaleFactor).coerceAtLeast(2f).dp, vertical = (1 * scaleFactor).coerceAtLeast(1f).dp),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = (3.5f * scaleFactor).coerceAtLeast(2f).dp, vertical = (1f * scaleFactor).coerceAtLeast(0.5f).dp),
                                 )
                             }
                         }
@@ -868,30 +1184,36 @@ private fun ChannelListItem(
                                 imageVector = Icons.Filled.Favorite,
                                 contentDescription = "Favourite",
                                 tint = FavRed,
-                                modifier = Modifier.size((15 * scaleFactor).coerceAtLeast(10f).dp),
+                                modifier = Modifier.size((14 * scaleFactor).coerceAtLeast(9.5f).dp),
                             )
                         }
                     }
 
-                    // Current programme
+                    // Current programme (Time + Title always fit on 1 line)
                     item.currentProgram?.let { prog ->
-                        Spacer(Modifier.height((4 * scaleFactor).coerceAtLeast(1f).dp))
+                        Spacer(Modifier.height((2.5f * scaleFactor).coerceAtLeast(1f).dp))
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy((6 * scaleFactor).coerceAtLeast(3f).dp),
+                            horizontalArrangement = Arrangement.spacedBy((4 * scaleFactor).coerceAtLeast(3f).dp),
                         ) {
                             Text(
-                                text = "${timeFmt.format(Date(prog.startMs))} – ${timeFmt.format(Date(prog.endMs))}",
+                                text = "${timeFmt.format(Date(prog.startMs))}–${timeFmt.format(Date(prog.endMs))}",
                                 color = if (isFocused) ChannelDesignTokens.NeonCyan else AccentBlue,
-                                fontSize = (11 * scaleFactor).coerceAtLeast(8f).sp,
-                                fontWeight = FontWeight.Medium,
+                                fontSize = (11.5f * scaleFactor).coerceAtLeast(9f).sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                softWrap = false,
                             )
                             Text(
                                 text = prog.title,
                                 color = if (isFocused) TextPrimary else TextSecondary,
-                                fontSize = (12 * scaleFactor).coerceAtLeast(8f).sp,
+                                fontSize = (12f * scaleFactor).coerceAtLeast(9.5f).sp,
+                                fontWeight = if (isFocused) FontWeight.Medium else FontWeight.Normal,
                                 maxLines = 1,
+                                softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
                             )
                         }
                     }
@@ -1095,6 +1417,8 @@ private fun TopBar(
     isSettingsFocused: Boolean,
     isSearchFocused: Boolean,
     isGroupFocused: Boolean,
+    isCompact: Boolean = false,
+    isPortrait: Boolean = false,
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onBackToFoldersClick: () -> Unit,
@@ -1105,39 +1429,50 @@ private fun TopBar(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xCC090C14))
-            .padding(horizontal = 24.dp, vertical = 12.dp),
+            .padding(
+                horizontal = if (isCompact) 10.dp else 24.dp,
+                vertical = if (isCompact) 5.dp else 12.dp,
+            ),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // ── Brand Logo & Mode Pill (Concept 1 & 2)
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isCompact) 8.dp else 16.dp),
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 6.dp),
         ) {
             // Minoga TV Glowing Brand
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isCompact) 4.dp else 8.dp),
             ) {
                 Icon(
                     imageVector = Icons.Filled.Tv,
                     contentDescription = "Minoga TV",
                     tint = ChannelDesignTokens.AccentGold,
-                    modifier = Modifier.size(24.dp),
+                    modifier = Modifier.size(if (isCompact) 18.dp else 24.dp),
                 )
-                Text(
-                    text = "Minoga TV",
-                    color = ChannelDesignTokens.AccentGold,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp,
-                )
+                if (!isPortrait) {
+                    Text(
+                        text = "Minoga TV",
+                        color = ChannelDesignTokens.AccentGold,
+                        fontSize = if (isCompact) 15.sp else 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
             }
 
             // Category/Folder Pill
             if (viewMode == ScreenViewMode.CHANNELS) {
                 Row(
                     modifier = Modifier
+                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (isGroupFocused) Color(0x332979FF) else Color(0x80131826))
                         .border(
@@ -1146,34 +1481,43 @@ private fun TopBar(
                             shape = RoundedCornerShape(20.dp),
                         )
                         .clickable(onClick = onBackToFoldersClick)
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                        .padding(
+                            horizontal = if (isCompact) 10.dp else 14.dp,
+                            vertical = if (isCompact) 3.dp else 6.dp,
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (isCompact) 5.dp else 8.dp),
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Назад к папкам",
                         tint = ChannelDesignTokens.NeonCyan,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(if (isCompact) 13.dp else 16.dp),
                     )
                     Text(
-                        text = "Папки / $selectedGroupName",
+                        text = if (isPortrait) selectedGroupName else "Папки / $selectedGroupName",
                         color = if (isGroupFocused) Color.White else TextPrimary,
-                        fontSize = 13.sp,
+                        fontSize = if (isCompact) 11.5.sp else 13.sp,
                         fontWeight = if (isGroupFocused) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                     if (channelCount > 0) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (isGroupFocused) ChannelDesignTokens.NeonCyan else Color(0x3300E5FF))
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                .padding(horizontal = if (isCompact) 5.dp else 6.dp, vertical = 1.dp),
                         ) {
                             Text(
                                 text = channelCount.toString(),
                                 color = if (isGroupFocused) Color.Black else Color.White,
-                                fontSize = 11.sp,
+                                fontSize = if (isCompact) 10.sp else 11.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
                             )
                         }
                     }
@@ -1181,6 +1525,7 @@ private fun TopBar(
             } else {
                 Row(
                     modifier = Modifier
+                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (isGroupFocused) Color(0x332979FF) else Color(0x80131826))
                         .border(
@@ -1189,34 +1534,42 @@ private fun TopBar(
                             shape = RoundedCornerShape(20.dp),
                         )
                         .clickable(onClick = onGroupClick)
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                        .padding(
+                            horizontal = if (isCompact) 10.dp else 14.dp,
+                            vertical = if (isCompact) 3.dp else 6.dp,
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (isCompact) 5.dp else 8.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Folder,
                         contentDescription = "Тематические папки",
                         tint = ChannelDesignTokens.NeonCyan,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(if (isCompact) 13.dp else 16.dp),
                     )
                     Text(
-                        text = "Тематические папки",
+                        text = if (isPortrait) "Minoga TV • Папки" else "Тематические папки",
                         color = if (isGroupFocused) Color.White else TextPrimary,
-                        fontSize = 13.sp,
+                        fontSize = if (isCompact) 11.5.sp else 13.sp,
                         fontWeight = if (isGroupFocused) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     if (folderCount > 0) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (isGroupFocused) ChannelDesignTokens.NeonCyan else Color(0x3300E5FF))
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                .padding(horizontal = if (isCompact) 5.dp else 6.dp, vertical = 1.dp),
                         ) {
                             Text(
                                 text = "$folderCount",
                                 color = if (isGroupFocused) Color.Black else Color.White,
-                                fontSize = 11.sp,
+                                fontSize = if (isCompact) 10.sp else 11.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
                             )
                         }
                     }
@@ -1227,64 +1580,78 @@ private fun TopBar(
         // ── Actions (Search & Settings)
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 10.dp),
         ) {
             // Search button
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .background(if (isSearchFocused) Color(0x4000E5FF) else Color(0xCC131826))
                     .border(
                         width = if (isSearchFocused) 2.dp else 1.dp,
                         color = if (isSearchFocused) ChannelDesignTokens.NeonCyan else Color(0x2B00E5FF),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                     )
                     .clickable(onClick = onSearchClick)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(
+                        horizontal = if (isPortrait) 8.dp else if (isCompact) 10.dp else 14.dp,
+                        vertical = if (isCompact) 4.dp else 8.dp,
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isCompact) 4.dp else 6.dp),
             ) {
                 Icon(
                     imageVector = Icons.Filled.Search,
                     contentDescription = "Поиск",
                     tint = if (isSearchFocused) Color.White else ChannelDesignTokens.NeonCyan,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(if (isCompact) 15.dp else 18.dp),
                 )
-                Text(
-                    text = "Поиск",
-                    color = if (isSearchFocused) Color.White else TextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = if (isSearchFocused) FontWeight.Bold else FontWeight.Medium,
-                )
+                if (!isPortrait) {
+                    Text(
+                        text = "Поиск",
+                        color = if (isSearchFocused) Color.White else TextPrimary,
+                        fontSize = if (isCompact) 11.5.sp else 13.sp,
+                        fontWeight = if (isSearchFocused) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
             }
 
             // Settings button (Right)
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .background(if (isSettingsFocused) Color(0x402979FF) else Color(0xCC131826))
                     .border(
                         width = if (isSettingsFocused) 2.dp else 1.dp,
                         color = if (isSettingsFocused) ChannelDesignTokens.NeonCyan else Color(0x2B00E5FF),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                     )
                     .clickable(onClick = onSettingsClick)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(
+                        horizontal = if (isPortrait) 8.dp else if (isCompact) 10.dp else 14.dp,
+                        vertical = if (isCompact) 4.dp else 8.dp,
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isCompact) 4.dp else 6.dp),
             ) {
                 Icon(
                     imageVector = Icons.Filled.Settings,
                     contentDescription = "Настройки",
                     tint = if (isSettingsFocused) Color.White else ChannelDesignTokens.NeonCyan,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(if (isCompact) 15.dp else 18.dp),
                 )
-                Text(
-                    text = "Настройки",
-                    color = if (isSettingsFocused) Color.White else TextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = if (isSettingsFocused) FontWeight.Bold else FontWeight.Medium,
-                )
+                if (!isPortrait) {
+                    Text(
+                        text = "Настройки",
+                        color = if (isSettingsFocused) Color.White else TextPrimary,
+                        fontSize = if (isCompact) 11.5.sp else 13.sp,
+                        fontWeight = if (isSettingsFocused) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
             }
         }
     }
@@ -1296,6 +1663,7 @@ private fun TopBar(
 private fun FolderGrid(
     uiState: ChannelListUiState,
     onFolderClick: (ChannelFolderItem) -> Unit,
+    columnsCount: Int = 4,
     modifier: Modifier = Modifier,
 ) {
     val gridState = rememberLazyGridState()
@@ -1314,10 +1682,10 @@ private fun FolderGrid(
     }
 
     LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
+        columns = GridCells.Fixed(columnsCount),
         state = gridState,
         modifier = modifier
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(horizontal = if (columnsCount <= 2) 10.dp else 16.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -1537,6 +1905,7 @@ private fun StitchLivePreviewCard(
     uiState: ChannelListUiState,
     previewPlayer: ExoPlayer,
     onPlayLive: (Long) -> Unit,
+    isCompact: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -1553,19 +1922,20 @@ private fun StitchLivePreviewCard(
         currentItem?.channel?.id == uiState.livePreviewChannelId &&
         currentItem.channel.streamUrl.isNotBlank()
 
+    val cardRadius = if (isCompact) 10.dp else 16.dp
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(cardRadius))
             .border(
-                width = 1.5.dp,
+                width = if (isCompact) 1.dp else 1.5.dp,
                 color = if (isVideoPlaying) ChannelDesignTokens.NeonCyan.copy(alpha = 0.5f) else Color(0x3300E5FF),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(cardRadius),
             )
             .clickable {
                 currentItem?.let { onPlayLive(it.channel.id) }
             },
         color = Color(0xFF0B101D),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(cardRadius),
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (isVideoPlaying) {
@@ -1573,9 +1943,13 @@ private fun StitchLivePreviewCard(
                     factory = { ctx ->
                         PlayerView(ctx).apply {
                             useController = false
+                            keepScreenOn = true
                             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                             player = previewPlayer
                         }
+                    },
+                    update = { pv ->
+                        pv.keepScreenOn = true
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -1584,7 +1958,7 @@ private fun StitchLivePreviewCard(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
+                        .height(if (isCompact) 26.dp else 48.dp)
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(Color(0xCC070A12), Color.Transparent),
@@ -1596,7 +1970,7 @@ private fun StitchLivePreviewCard(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(60.dp)
+                        .height(if (isCompact) 36.dp else 60.dp)
                         .align(Alignment.BottomCenter)
                         .background(
                             Brush.verticalGradient(
@@ -1621,46 +1995,59 @@ private fun StitchLivePreviewCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .padding(
+                        horizontal = if (isCompact) 8.dp else 12.dp,
+                        vertical = if (isCompact) 4.dp else 10.dp,
+                    )
                     .align(Alignment.TopCenter),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(RoundedCornerShape(if (isCompact) 4.dp else 6.dp))
                         .background(if (isVideoPlaying) Color(0x33EF4444) else Color(0x3300E5FF))
-                        .border(1.dp, if (isVideoPlaying) Color(0x80EF4444) else Color(0x4D00E5FF), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                        .border(1.dp, if (isVideoPlaying) Color(0x80EF4444) else Color(0x4D00E5FF), RoundedCornerShape(if (isCompact) 4.dp else 6.dp))
+                        .padding(
+                            horizontal = if (isCompact) 5.dp else 8.dp,
+                            vertical = if (isCompact) 1.dp else 3.dp,
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(7.dp)
+                            .size(if (isCompact) 5.dp else 7.dp)
                             .clip(CircleShape)
                             .background(if (isVideoPlaying) Color(0xFFEF4444) else ChannelDesignTokens.NeonCyan),
                     )
                     Text(
                         text = if (isVideoPlaying) "● ПРЯМОЙ ЭФИР" else "ЖИВОЕ ПРЕВЬЮ",
                         color = Color.White,
-                        fontSize = 10.sp,
+                        fontSize = if (isCompact) 8.sp else 10.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp,
+                        letterSpacing = 0.4.sp,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
 
                 Surface(
-                    shape = RoundedCornerShape(6.dp),
+                    shape = RoundedCornerShape(if (isCompact) 4.dp else 6.dp),
                     color = Color(0x66070A12),
                     border = BorderStroke(1.dp, Color(0x3300E5FF)),
                 ) {
                     Text(
                         text = "1080p FHD",
                         color = ChannelDesignTokens.NeonCyan,
-                        fontSize = 10.sp,
+                        fontSize = if (isCompact) 8.sp else 10.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(
+                            horizontal = if (isCompact) 5.dp else 7.dp,
+                            vertical = if (isCompact) 1.dp else 2.dp,
+                        ),
                     )
                 }
             }
@@ -1670,32 +2057,37 @@ private fun StitchLivePreviewCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .padding(
+                            horizontal = if (isCompact) 8.dp else 14.dp,
+                            vertical = if (isCompact) 3.dp else 8.dp,
+                        )
                         .align(Alignment.BottomCenter),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 10.dp),
                 ) {
                     ChannelLogo(
                         logoUrl = item.channel.logoUrl,
                         isFocused = true,
-                        size = 32.dp,
+                        size = if (isCompact) 22.dp else 32.dp,
                     )
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = item.channel.name,
                             color = Color.White,
-                            fontSize = 14.sp,
+                            fontSize = if (isCompact) 11.sp else 14.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis,
                         )
                         item.currentProgram?.let { prog ->
                             Text(
                                 text = prog.title,
                                 color = ChannelDesignTokens.NeonCyan,
-                                fontSize = 11.sp,
+                                fontSize = if (isCompact) 9.sp else 11.sp,
                                 maxLines = 1,
+                                softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }

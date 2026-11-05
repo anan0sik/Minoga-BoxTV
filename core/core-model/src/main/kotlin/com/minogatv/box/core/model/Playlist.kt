@@ -54,6 +54,8 @@ data class Playlist(
 ) {
     companion object {
         const val DEFAULT_USER_AGENT = "MinogaTVBox/1.0 (Android)"
+        /** Default Web Portal URL for remote playlist & EPG configuration */
+        const val DEFAULT_WEB_CONFIG_URL = "https://minogatvbox.duckdns.org"
         /** Primary default XMLTV EPG source (epg.one) */
         const val DEFAULT_EPG_URL = "http://epg.one/epg2.xml.gz"
         /** Secondary public fallback XMLTV EPG source (direct CDN) */

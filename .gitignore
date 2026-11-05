@@ -27,3 +27,8 @@ local.properties
 *.class
 *.hprof
 .attach_pid*
+
+server/deploy/out/
+server/deploy/out-apk/
+build-logic/bin/
+

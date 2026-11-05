@@ -199,6 +199,12 @@ sealed class ChannelListIntent {
     /** Move D-Pad focus up or down within the channel list. */
     data class MoveFocus(val delta: Int) : ChannelListIntent()
 
+    /** Directly select/focus a channel at [index] (e.g. single tap on touch screen). */
+    data class SelectChannelIndex(val index: Int) : ChannelListIntent()
+
+    /** Directly select/focus an EPG item at [index] in the side panel (e.g. single tap on touch screen). */
+    data class SelectSidePanelIndex(val index: Int) : ChannelListIntent()
+
     /** Move D-Pad focus within the thematic folders list. */
     data class MoveFolderFocus(val delta: Int) : ChannelListIntent()
 

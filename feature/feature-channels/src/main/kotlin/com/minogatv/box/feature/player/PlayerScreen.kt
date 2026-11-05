@@ -3,9 +3,12 @@ package com.minogatv.box.feature.player
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.os.Build
 import android.view.KeyEvent
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
@@ -60,6 +63,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.minogatv.box.feature.channels.ChannelDesignTokens
+import com.minogatv.box.feature.ui.LocalScreenKeyDispatcher
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -69,6 +74,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -112,10 +118,22 @@ fun PlayerScreen(
     }
 
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val isPortrait = configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
+    val isCompact = isPortrait || configuration.screenHeightDp < 500 || configuration.screenWidthDp < 700
     val uiState by viewModel.uiState.collectAsState()
     val currentUiState by rememberUpdatedState(uiState)
     val focusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
+
+    DisposableEffect(context) {
+        val activity = context.findPlayerActivity()
+        activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
 
     val prefs = remember { context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE) }
     val seekStepSeconds = remember(uiState.isCatchupMode) { prefs.getInt("seek_step_seconds", 10) }
@@ -381,7 +399,99 @@ fun PlayerScreen(
         }
     }
 
-    // ─── Auto-focus for D-Pad Remote ──────────────────────────────────────────
+    // ─── Auto-focus & direct key registration for D-Pad Remote & Touch Gestures ─
+    val screenKeyDispatcher = LocalScreenKeyDispatcher.current
+    val handlePlayerKey by rememberUpdatedState { nativeEvent: KeyEvent ->
+        if (nativeEvent.action == KeyEvent.ACTION_DOWN) {
+            // Any key press resets the screensaver timer
+            viewModel.onUserInteraction()
+
+            when (nativeEvent.keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP,
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (!uiState.isCatchupMode) {
+                        if (nativeEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                            viewModel.previousChannel()
+                        } else {
+                            viewModel.nextChannel()
+                        }
+                        true
+                    } else {
+                        viewModel.showOsd()
+                        true
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT,
+                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                KeyEvent.KEYCODE_MEDIA_STEP_FORWARD -> {
+                    val hasCatchup = uiState.isCatchupMode || uiState.isArchiveSupported || (uiState.channel?.hasArchive == true)
+
+                    if (hasCatchup) {
+                        val isRepeat = nativeEvent.repeatCount > 0
+                        onSeek(true, isRepeat)
+                        true
+                    } else false
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_MEDIA_REWIND,
+                KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD -> {
+                    val hasCatchup = uiState.isCatchupMode || uiState.isArchiveSupported || (uiState.channel?.hasArchive == true)
+
+                    if (hasCatchup) {
+                        val isRepeat = nativeEvent.repeatCount > 0
+                        onSeek(false, isRepeat)
+                        true
+                    } else false
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER -> {
+                    viewModel.toggleOsd()
+                    true
+                }
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                KeyEvent.KEYCODE_MEDIA_PLAY,
+                KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                    if (exoPlayer.isPlaying) {
+                        exoPlayer.pause()
+                        // When pausing live TV with catch-up support, switch to timeshift
+                        if (!uiState.isCatchupMode && (uiState.isArchiveSupported || uiState.channel?.hasArchive == true)) {
+                            viewModel.switchToCatchup()
+                        }
+                    } else {
+                        exoPlayer.play()
+                    }
+                    viewModel.showOsd()
+                    true
+                }
+                KeyEvent.KEYCODE_BACK -> {
+                    // If in catch-up mode, go back to live first
+                    if (uiState.isCatchupMode) {
+                        pendingSeekTargetTimeMs = null
+                        seekRepeatCount = 0
+                        seekDebounceJob?.cancel()
+                        seekFeedbackText = null
+                        viewModel.switchToLive()
+                        true
+                    } else {
+                        onBack()
+                        true
+                    }
+                }
+                else -> false
+            }
+        } else false
+    }
+
+    DisposableEffect(screenKeyDispatcher) {
+        val handler: (KeyEvent) -> Boolean = { event -> handlePlayerKey(event) }
+        screenKeyDispatcher?.activeHandler = handler
+        onDispose {
+            if (screenKeyDispatcher?.activeHandler === handler) {
+                screenKeyDispatcher.activeHandler = null
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
@@ -392,85 +502,15 @@ fun PlayerScreen(
             .background(Color.Black)
             .focusRequester(focusRequester)
             .focusable()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
+                viewModel.onUserInteraction()
+                viewModel.toggleOsd()
+            }
             .onPreviewKeyEvent { event ->
-                if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                    // Any key press resets the screensaver timer
-                    viewModel.onUserInteraction()
-
-                    when (event.nativeKeyEvent.keyCode) {
-                        KeyEvent.KEYCODE_DPAD_UP,
-                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            if (!uiState.isCatchupMode) {
-                                if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                                    viewModel.previousChannel()
-                                } else {
-                                    viewModel.nextChannel()
-                                }
-                                true
-                            } else {
-                                viewModel.showOsd()
-                                true
-                            }
-                        }
-                        KeyEvent.KEYCODE_DPAD_RIGHT,
-                        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
-                        KeyEvent.KEYCODE_MEDIA_STEP_FORWARD -> {
-                            val hasCatchup = uiState.isCatchupMode || uiState.isArchiveSupported || (uiState.channel?.hasArchive == true)
-
-                            if (hasCatchup) {
-                                val isRepeat = event.nativeKeyEvent.repeatCount > 0
-                                onSeek(true, isRepeat)
-                                true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_DPAD_LEFT,
-                        KeyEvent.KEYCODE_MEDIA_REWIND,
-                        KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD -> {
-                            val hasCatchup = uiState.isCatchupMode || uiState.isArchiveSupported || (uiState.channel?.hasArchive == true)
-
-                            if (hasCatchup) {
-                                val isRepeat = event.nativeKeyEvent.repeatCount > 0
-                                onSeek(false, isRepeat)
-                                true
-                            } else false
-                        }
-                        KeyEvent.KEYCODE_DPAD_CENTER,
-                        KeyEvent.KEYCODE_ENTER -> {
-                            viewModel.toggleOsd()
-                            true
-                        }
-                        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-                        KeyEvent.KEYCODE_MEDIA_PLAY,
-                        KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                            if (exoPlayer.isPlaying) {
-                                exoPlayer.pause()
-                                // When pausing live TV with catch-up support, switch to timeshift
-                                if (!uiState.isCatchupMode && (uiState.isArchiveSupported || uiState.channel?.hasArchive == true)) {
-                                    viewModel.switchToCatchup()
-                                }
-                            } else {
-                                exoPlayer.play()
-                            }
-                            viewModel.showOsd()
-                            true
-                        }
-                        KeyEvent.KEYCODE_BACK -> {
-                            // If in catch-up mode, go back to live first
-                            if (uiState.isCatchupMode) {
-                                pendingSeekTargetTimeMs = null
-                                seekRepeatCount = 0
-                                seekDebounceJob?.cancel()
-                                seekFeedbackText = null
-                                viewModel.switchToLive()
-                                true
-                            } else {
-                                onBack()
-                                true
-                            }
-                        }
-                        else -> false
-                    }
-                } else false
+                handlePlayerKey(event.nativeKeyEvent)
             },
     ) {
         // ─── Surface View Video Player ────────────────────────────────────────
@@ -486,6 +526,7 @@ fun PlayerScreen(
                 PlayerView(ctx).apply {
                     player = exoPlayer
                     useController = false
+                    keepScreenOn = true
                     setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
                     isFocusable = false
                     isFocusableInTouchMode = false
@@ -497,6 +538,7 @@ fun PlayerScreen(
             },
             update = { playerView ->
                 playerView.resizeMode = resizeMode
+                playerView.keepScreenOn = true
             },
             modifier = Modifier.fillMaxSize(),
         )
@@ -638,113 +680,108 @@ fun PlayerScreen(
                         ),
                     ),
             ) {
-                // Top Bar
-                Row(
+                // Top Bar (Adaptive for Portrait & Landscape)
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .padding(
+                            horizontal = if (isCompact) 12.dp else 24.dp,
+                            vertical = if (isCompact) 10.dp else 20.dp,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Назад",
-                                tint = Color.White,
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = "${uiState.channelIndex + 1}. ${uiState.channel?.name.orEmpty()}",
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        uiState.channel?.groupTitle?.takeIf { it.isNotEmpty() }?.let { grp ->
-                            Spacer(Modifier.width(12.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xFF222938))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp),
+                        ) {
+                            IconButton(
+                                onClick = onBack,
+                                modifier = Modifier.size(if (isCompact) 36.dp else 44.dp),
                             ) {
-                                Text(grp, color = Color(0xFFE5A00D), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Назад",
+                                    tint = Color.White,
+                                )
                             }
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "${uiState.channelIndex + 1}. ${uiState.channel?.name.orEmpty()}",
+                                color = Color.White,
+                                fontSize = if (isCompact) 15.sp else 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            if (!isPortrait) {
+                                uiState.channel?.groupTitle?.takeIf { it.isNotEmpty() }?.let { grp ->
+                                    Spacer(Modifier.width(10.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFF222938))
+                                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                                    ) {
+                                        Text(
+                                            text = grp,
+                                            color = Color(0xFFE5A00D),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isPortrait) {
+                            val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+                            Text(
+                                text = timeFmt.format(Date()),
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        } else {
+                            // Landscape Right Controls: Rotate, Aspect Ratio, Sleep Timer, PiP & Clock
+                            PlayerTopActionRow(
+                                uiState = uiState,
+                                isPortrait = false,
+                                isCompact = isCompact,
+                                prefs = prefs,
+                                context = context,
+                                onToggleOrientation = {
+                                    val act = context.findPlayerActivity()
+                                    act?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                                },
+                                onCycleAspectRatio = { viewModel.cycleAspectRatio() },
+                                onCycleSleepTimer = { viewModel.cycleSleepTimer() },
+                            )
                         }
                     }
 
-                    // Top Right: Aspect Ratio, Sleep Timer, PiP & Clock
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        // Aspect Ratio button
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xCC131826))
-                                .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(8.dp))
-                                .clickable { viewModel.cycleAspectRatio() }
-                                .padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            Icon(Icons.Filled.AspectRatio, contentDescription = null, tint = com.minogatv.box.feature.channels.ChannelDesignTokens.NeonCyan, modifier = Modifier.size(16.dp))
-                            Text(uiState.aspectRatio.label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-
-                        // Sleep Timer button
-                        val isSleepActive = uiState.sleepTimerMinutes > 0
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSleepActive) Color(0x66FFD54F) else Color(0xCC131826))
-                                .border(1.dp, if (isSleepActive) com.minogatv.box.feature.channels.ChannelDesignTokens.AccentGold else Color(0x3300E5FF), RoundedCornerShape(8.dp))
-                                .clickable { viewModel.cycleSleepTimer() }
-                                .padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        ) {
-                            Icon(Icons.Filled.Timer, contentDescription = null, tint = if (isSleepActive) com.minogatv.box.feature.channels.ChannelDesignTokens.AccentGold else Color.White, modifier = Modifier.size(16.dp))
-                            Text(
-                                if (isSleepActive) "${uiState.sleepTimerMinutes} мин" else "Сон",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-
-                        // Picture in Picture button
-                        val pipEnabled = remember { prefs.getBoolean("pip_enabled", true) }
-                        if (pipEnabled) {
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xCC131826))
-                                    .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        val activity = context as? Activity
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                            activity?.enterPictureInPictureMode(PictureInPictureParams.Builder().build())
-                                        }
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            ) {
-                                Icon(Icons.Filled.PictureInPicture, contentDescription = "PiP", tint = com.minogatv.box.feature.channels.ChannelDesignTokens.NeonCyan, modifier = Modifier.size(16.dp))
-                                Text("PiP", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-
-                        // Current clock
-                        val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
-                        Text(
-                            text = timeFmt.format(Date()),
-                            color = Color.White,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold,
+                    if (isPortrait) {
+                        // Portrait Row 2: Action buttons cleanly aligned across the top
+                        PlayerTopActionRow(
+                            uiState = uiState,
+                            isPortrait = true,
+                            isCompact = true,
+                            prefs = prefs,
+                            context = context,
+                            onToggleOrientation = {
+                                val act = context.findPlayerActivity()
+                                act?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                            },
+                            onCycleAspectRatio = { viewModel.cycleAspectRatio() },
+                            onCycleSleepTimer = { viewModel.cycleSleepTimer() },
                         )
                     }
                 }
@@ -759,13 +796,16 @@ fun PlayerScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 28.dp, vertical = 12.dp),
+                            .padding(
+                                horizontal = if (isCompact) 12.dp else 28.dp,
+                                vertical = if (isCompact) 8.dp else 12.dp,
+                            ),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         // Channel Logo
                         Box(
                             modifier = Modifier
-                                .size(56.dp)
+                                .size(if (isCompact) 42.dp else 56.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(Color(0xFF1E2533)),
                             contentAlignment = Alignment.Center,
@@ -774,7 +814,7 @@ fun PlayerScreen(
                                 AsyncImage(
                                     model = uiState.channel!!.logoUrl,
                                     contentDescription = null,
-                                    modifier = Modifier.size(46.dp),
+                                    modifier = Modifier.size(if (isCompact) 34.dp else 46.dp),
                                     contentScale = ContentScale.Fit,
                                 )
                             } else {
@@ -782,12 +822,12 @@ fun PlayerScreen(
                                     Icons.Filled.PlayArrow,
                                     contentDescription = null,
                                     tint = Color(0xFFE5A00D),
-                                    modifier = Modifier.size(28.dp),
+                                    modifier = Modifier.size(if (isCompact) 22.dp else 28.dp),
                                 )
                             }
                         }
 
-                        Spacer(Modifier.width(16.dp))
+                        Spacer(Modifier.width(if (isCompact) 10.dp else 16.dp))
 
                         // Program titles & Progress
                         Column(modifier = Modifier.weight(1f)) {
@@ -873,21 +913,60 @@ fun PlayerScreen(
                         }
                     }
 
-                    // ── Bottom Remote Control Guide Bar ──────────────────────────────
+                    // ── Bottom Remote Control Guide Bar (tappable on touch screens) ──
+                    val togglePlayPause = {
+                        if (exoPlayer.isPlaying) {
+                            exoPlayer.pause()
+                            if (!uiState.isCatchupMode && (uiState.isArchiveSupported || uiState.channel?.hasArchive == true)) {
+                                viewModel.switchToCatchup()
+                            }
+                        } else {
+                            exoPlayer.play()
+                        }
+                        viewModel.showOsd()
+                    }
                     RemoteControlHintBar(
                         hints = if (uiState.isCatchupMode) {
                             listOf(
-                                RemoteHint(keyLabel = "◀ ▶", action = "Перемотка (±${seekStepSeconds}с)"),
-                                RemoteHint(keyLabel = "OK", action = "Инфо / OSD"),
-                                RemoteHint(keyLabel = "⏯", action = "Пауза"),
-                                RemoteHint(keyLabel = "Назад", action = "Прямой эфир"),
+                                RemoteHint(keyLabel = "◀", action = "-${seekStepSeconds}с") {
+                                    onSeek(false, false)
+                                },
+                                RemoteHint(keyLabel = "▶", action = "+${seekStepSeconds}с") {
+                                    onSeek(true, false)
+                                },
+                                RemoteHint(keyLabel = "OK", action = "Инфо / OSD") {
+                                    viewModel.toggleOsd()
+                                },
+                                RemoteHint(keyLabel = "⏯", action = "Пауза / Старт") {
+                                    togglePlayPause()
+                                },
+                                RemoteHint(keyLabel = "Назад", action = "Прямой эфир") {
+                                    pendingSeekTargetTimeMs = null
+                                    seekRepeatCount = 0
+                                    seekDebounceJob?.cancel()
+                                    seekFeedbackText = null
+                                    viewModel.switchToLive()
+                                },
                             )
                         } else {
                             listOfNotNull(
-                                RemoteHint(keyLabel = "▲▼", action = "Канал"),
-                                RemoteHint(keyLabel = "OK", action = "Инфо / OSD"),
-                                if (uiState.isArchiveSupported || uiState.channel?.hasArchive == true) RemoteHint(keyLabel = "⏯", action = "Архив") else null,
-                                RemoteHint(keyLabel = "Назад", action = "Список каналов"),
+                                RemoteHint(keyLabel = "▲", action = "Пред. канал") {
+                                    viewModel.previousChannel()
+                                },
+                                RemoteHint(keyLabel = "▼", action = "След. канал") {
+                                    viewModel.nextChannel()
+                                },
+                                RemoteHint(keyLabel = "OK", action = "Инфо / OSD") {
+                                    viewModel.toggleOsd()
+                                },
+                                if (uiState.isArchiveSupported || uiState.channel?.hasArchive == true) {
+                                    RemoteHint(keyLabel = "⏯", action = "Архив / Пауза") {
+                                        togglePlayPause()
+                                    }
+                                } else null,
+                                RemoteHint(keyLabel = "Назад", action = "Список каналов") {
+                                    onBack()
+                                },
                             )
                         },
                     )
@@ -941,4 +1020,161 @@ fun PlayerScreen(
         // ─── OLED Screensaver Overlay ──────────────────────────────────────────
         ScreensaverOverlay(isActive = uiState.isScreensaverActive)
     }
+}
+
+@Composable
+private fun PlayerTopActionRow(
+    uiState: PlayerUiState,
+    isPortrait: Boolean,
+    isCompact: Boolean,
+    prefs: android.content.SharedPreferences,
+    context: Context,
+    onToggleOrientation: () -> Unit,
+    onCycleAspectRatio: () -> Unit,
+    onCycleSleepTimer: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 10.dp),
+    ) {
+        // Rotate Screen button (Portrait <-> Landscape)
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xCC131826))
+                .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(8.dp))
+                .clickable { onToggleOrientation() }
+                .padding(horizontal = if (isCompact) 8.dp else 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                Icons.Filled.Refresh,
+                contentDescription = "Повернуть экран",
+                tint = ChannelDesignTokens.NeonCyan,
+                modifier = Modifier.size(if (isCompact) 14.dp else 16.dp),
+            )
+            Text(
+                text = if (isPortrait) "Альбомный" else "Портретный",
+                color = Color.White,
+                fontSize = if (isCompact) 11.sp else 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+
+        // Aspect Ratio button
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xCC131826))
+                .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(8.dp))
+                .clickable { onCycleAspectRatio() }
+                .padding(horizontal = if (isCompact) 8.dp else 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                Icons.Filled.AspectRatio,
+                contentDescription = null,
+                tint = ChannelDesignTokens.NeonCyan,
+                modifier = Modifier.size(if (isCompact) 14.dp else 16.dp),
+            )
+            Text(
+                text = uiState.aspectRatio.label,
+                color = Color.White,
+                fontSize = if (isCompact) 11.sp else 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+
+        // Sleep Timer button
+        val isSleepActive = uiState.sleepTimerMinutes > 0
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (isSleepActive) Color(0x66FFD54F) else Color(0xCC131826))
+                .border(
+                    1.dp,
+                    if (isSleepActive) ChannelDesignTokens.AccentGold else Color(0x3300E5FF),
+                    RoundedCornerShape(8.dp),
+                )
+                .clickable { onCycleSleepTimer() }
+                .padding(horizontal = if (isCompact) 8.dp else 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                Icons.Filled.Timer,
+                contentDescription = null,
+                tint = if (isSleepActive) ChannelDesignTokens.AccentGold else Color.White,
+                modifier = Modifier.size(if (isCompact) 14.dp else 16.dp),
+            )
+            Text(
+                text = if (isSleepActive) "${uiState.sleepTimerMinutes} мин" else "Сон",
+                color = Color.White,
+                fontSize = if (isCompact) 11.sp else 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+
+        // Picture in Picture button
+        val pipEnabled = remember { prefs.getBoolean("pip_enabled", true) }
+        if (pipEnabled) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xCC131826))
+                    .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(8.dp))
+                    .clickable {
+                        val activity = context.findPlayerActivity()
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            activity?.enterPictureInPictureMode(PictureInPictureParams.Builder().build())
+                        }
+                    }
+                    .padding(horizontal = if (isCompact) 8.dp else 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    Icons.Filled.PictureInPicture,
+                    contentDescription = "PiP",
+                    tint = ChannelDesignTokens.NeonCyan,
+                    modifier = Modifier.size(if (isCompact) 14.dp else 16.dp),
+                )
+                Text(
+                    text = "PiP",
+                    color = Color.White,
+                    fontSize = if (isCompact) 11.sp else 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
+
+        if (!isPortrait) {
+            // Current clock
+            val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+            Text(
+                text = timeFmt.format(Date()),
+                color = Color.White,
+                fontSize = if (isCompact) 14.sp else 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+}
+
+private fun Context.findPlayerActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findPlayerActivity()
+    else -> null
 }

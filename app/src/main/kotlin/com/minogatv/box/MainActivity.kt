@@ -4,6 +4,15 @@ import android.app.PictureInPictureParams
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.WindowManager
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import com.minogatv.box.feature.ui.DisclaimerScreen
+import com.minogatv.box.feature.ui.LocalScreenKeyDispatcher
+import com.minogatv.box.feature.ui.ScreenKeyDispatcher
+import com.minogatv.box.input.TouchRemoteController
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -43,16 +52,24 @@ class MainActivity : ComponentActivity() {
 
     private var isPlayerActive by mutableStateOf(false)
 
+    /** Direct key dispatcher so D-pad & gesture keys work even in Compose InputMode.Touch. */
+    private val screenKeyDispatcher = ScreenKeyDispatcher()
+
+    /** Touch-screen gestures → virtual D-pad remote keys (double tap = OK, swipes = arrows). */
+    private val touchRemote by lazy { TouchRemoteController(this) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_MinogaTVBox)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        lifecycleScope.launch {
-            backupManager.checkAndAutoRestoreOnFirstLaunch()
+        val prefs = getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("accepted_terms", false)) {
+            lifecycleScope.launch {
+                backupManager.checkAndAutoRestoreOnFirstLaunch()
+            }
         }
 
-        val prefs = getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
         val autoPlayLast = prefs.getBoolean("auto_play_last_channel", false)
         val lastChannelId = prefs.getLong("last_watched_channel_id", 0L)
 
@@ -63,19 +80,77 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MinogaTVBoxTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
-                ) {
-                    MinogaNavHost(
-                        startDestination = startDest,
-                        onPlayerStateChanged = { active -> isPlayerActive = active },
-                    )
+            var acceptedTerms by remember {
+                mutableStateOf(prefs.getBoolean("accepted_terms", false))
+            }
+
+            CompositionLocalProvider(LocalScreenKeyDispatcher provides screenKeyDispatcher) {
+                MinogaTVBoxTheme {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background,
+                    ) {
+                        if (!acceptedTerms) {
+                            DisclaimerScreen(
+                                onAccept = {
+                                    prefs.edit().putBoolean("accepted_terms", true).apply()
+                                    acceptedTerms = true
+                                    lifecycleScope.launch {
+                                        backupManager.checkAndAutoRestoreOnFirstLaunch()
+                                    }
+                                },
+                                onDecline = {
+                                    finishAffinity()
+                                },
+                            )
+                        } else {
+                            MinogaNavHost(
+                                startDestination = startDest,
+                                onPlayerStateChanged = { active ->
+                                    isPlayerActive = active
+                                    if (active) {
+                                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                                    } else {
+                                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                                    }
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
     }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) touchRemote.ensureKeyFocus()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (screenKeyDispatcher.dispatch(event)) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val prefs = getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+        if (!isInPictureInPictureModeCompat() && prefs.getBoolean(TouchRemoteController.PREF_KEY, true)) {
+            val cancelNativeClick = touchRemote.onTouchEvent(ev, isPlayerActive = isPlayerActive)
+            if (cancelNativeClick && ev.actionMasked == MotionEvent.ACTION_UP) {
+                val cancelEv = MotionEvent.obtain(ev)
+                cancelEv.action = MotionEvent.ACTION_CANCEL
+                super.dispatchTouchEvent(cancelEv)
+                cancelEv.recycle()
+                return true
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun isInPictureInPictureModeCompat(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()

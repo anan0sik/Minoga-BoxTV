@@ -1,0 +1,15 @@
+[Unit]
+Description=Minoga TV Box web pairing portal (minogatvbox.duckdns.org)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/minogatvbox
+ExecStart=/usr/bin/java -cp /opt/minogatvbox server.IptvMockServer 8091
+Restart=always
+RestartSec=3
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target

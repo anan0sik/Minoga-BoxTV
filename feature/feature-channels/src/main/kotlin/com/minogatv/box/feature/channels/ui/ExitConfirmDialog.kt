@@ -112,7 +112,7 @@ fun ExitConfirmDialog(
             containerColor = Color(0xF20F172A),
             shape = RoundedCornerShape(20.dp),
             modifier = Modifier
-                .width(440.dp)
+                .fillMaxWidth(0.94f)
                 .border(
                     width = 1.5.dp,
                     color = ChannelDesignTokens.NeonCyan.copy(alpha = 0.5f),

@@ -90,6 +90,7 @@ import com.minogatv.box.feature.ui.RemoteHint
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.minogatv.box.core.model.Playlist
+import com.minogatv.box.core.model.WebPairingStatus
 import com.minogatv.box.core.model.enums.PlaylistType
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -258,6 +259,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val pairingState by viewModel.webPairingState.collectAsState()
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE) }
 
@@ -274,13 +276,18 @@ fun SettingsScreen(
         )
     }
     var customEpgUrl by remember { mutableStateOf(prefs.getString("custom_epg_url", "") ?: "") }
+    val webConfigUrl = remember {
+        prefs.getString("web_config_url", Playlist.DEFAULT_WEB_CONFIG_URL)
+            ?.takeIf { it.isNotBlank() } ?: Playlist.DEFAULT_WEB_CONFIG_URL
+    }
     var autoEpgSync  by remember { mutableStateOf(prefs.getBoolean("auto_epg_sync", true)) }
     var showEpgDialog by remember { mutableStateOf(false) }
     var showPinChangeDialog by remember { mutableStateOf(false) }
     var currentPin by remember { mutableStateOf(prefs.getString("parental_pin", "0000") ?: "0000") }
     var seekStepSeconds by remember { mutableStateOf(prefs.getInt("seek_step_seconds", 10)) }
     var pipEnabled by remember { mutableStateOf(prefs.getBoolean("pip_enabled", true)) }
-    var uiScalePercent by remember { mutableStateOf(prefs.getInt("ui_scale_percent", 100)) }
+    var touchGesturesEnabled by remember { mutableStateOf(prefs.getBoolean("touch_gestures_enabled", true)) }
+    var uiScalePercent by remember { mutableStateOf(prefs.getInt("ui_scale_percent", 40)) }
 
     var showAddDialog      by remember { mutableStateOf(false) }
     var editingPlaylist    by remember { mutableStateOf<Playlist?>(null) }
@@ -406,11 +413,62 @@ fun SettingsScreen(
                 )
             }
 
+            // ── Remote Web Page Loader Card (minogatvbox.duckdns.org) ──────
+            item {
+                SettingCardContainer { isFocused ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text(
+                                text = "Загрузка плейлиста и EPG по коду с веб-страницы",
+                                color = if (isFocused) Color.White else TextPrim,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = "Откройте minogatvbox.duckdns.org, введите 4-значный код и укажите Название, Плейлист и EPG",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                viewModel.startWebPairingSession(
+                                    pageUrl = webConfigUrl,
+                                    onConfigApplied = { cfg ->
+                                        cfg.epgUrl?.let { customEpgUrl = it }
+                                    },
+                                )
+                            },
+                            enabled = !uiState.isLoading,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text("🌐 Загрузить с ВЕБ-страницы", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
             // ── Playlist rows ──────────────────────────────────────────────
             if (uiState.playlists.isEmpty() && !uiState.isLoading) {
                 item {
                     EmptyPlaylistHint(
                         onAdd = { showAddDialog = true },
+                        onLoadFromWeb = {
+                            viewModel.startWebPairingSession(
+                                pageUrl = webConfigUrl,
+                                onConfigApplied = { cfg ->
+                                    cfg.epgUrl?.let { customEpgUrl = it }
+                                },
+                            )
+                        },
                         onAddDemo = {
                             viewModel.addPlaylist(
                                 Playlist(
@@ -515,6 +573,30 @@ fun SettingsScreen(
                         onCheckedChange = { checked ->
                             pipEnabled = checked
                             prefs.edit().putBoolean("pip_enabled", checked).apply()
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Accent,
+                            uncheckedThumbColor = TextSec,
+                            uncheckedTrackColor = Surface2,
+                        ),
+                    )
+                }
+            }
+
+            // Touch-screen gesture control (emulates the D-pad remote)
+            item {
+                Spacer(Modifier.height(8.dp))
+                SettingRowContainer { isFocused ->
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Управление жестами (сенсорный экран)", color = if (isFocused) Color.White else TextPrim, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Двойной тап — ОК, удержание — долгое ОК, свайп влево/вправо/вверх/вниз — стрелки пульта, тап двумя пальцами — Назад", color = TextSec, fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = touchGesturesEnabled,
+                        onCheckedChange = { checked ->
+                            touchGesturesEnabled = checked
+                            prefs.edit().putBoolean("touch_gestures_enabled", checked).apply()
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
@@ -935,13 +1017,13 @@ fun SettingsScreen(
         )
     }
 
-    // ── Backup message dialog ────────────────────────────────────────────────
+    // ── Backup / Web Config message dialog ───────────────────────────────────
     uiState.backupMessage?.let { msg ->
         AlertDialog(
             onDismissRequest = { viewModel.dismissBackupMessage() },
             containerColor = Surface1,
             title = {
-                Text("Резервное копирование", color = TextPrim, fontWeight = FontWeight.Bold)
+                Text("Успешно выполнено", color = TextPrim, fontWeight = FontWeight.Bold)
             },
             text = {
                 Text(
@@ -953,6 +1035,30 @@ fun SettingsScreen(
             confirmButton = {
                 Button(
                     onClick = { viewModel.dismissBackupMessage() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent),
+                ) { Text("OK", color = Color.Black) }
+            },
+        )
+    }
+
+    // ── Error message dialog ─────────────────────────────────────────────────
+    uiState.errorMessage?.let { errMsg ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissError() },
+            containerColor = Surface1,
+            title = {
+                Text("Ошибка", color = DangerRed, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    text = errMsg,
+                    color = TextPrim,
+                    fontSize = 14.sp,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.dismissError() },
                     colors = ButtonDefaults.buttonColors(containerColor = Accent),
                 ) { Text("OK", color = Color.Black) }
             },
@@ -1024,6 +1130,185 @@ fun SettingsScreen(
             },
             onDismiss = { showEpgDialog = false },
         )
+    }
+
+    // ── Web Code Pairing Dialog (minogatvbox.duckdns.org) ────────────────────
+    if (pairingState.isVisible) {
+        WebCodePairingDialog(
+            state = pairingState,
+            onRegenerateCode = {
+                viewModel.startWebPairingSession(
+                    pageUrl = webConfigUrl,
+                    onConfigApplied = { cfg ->
+                        cfg.epgUrl?.let { customEpgUrl = it }
+                    },
+                )
+            },
+            onDismiss = { viewModel.stopWebPairingSession() },
+        )
+    }
+}
+
+@Composable
+private fun WebCodePairingDialog(
+    state: WebPairingDialogState,
+    onRegenerateCode: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val closeFocusRequester = remember { FocusRequester() }
+    val isVerifiedOrReady = state.status == WebPairingStatus.VERIFIED || state.status == WebPairingStatus.READY
+    val accentColor = if (isVerifiedOrReady) Color(0xFF10B981) else Color(0xFF00E5FF)
+
+    LaunchedEffect(Unit) {
+        closeFocusRequester.requestFocus()
+    }
+
+    Dialog(
+        onDismissRequest = { if (!state.isInstalling) onDismiss() },
+        properties = DialogProperties(
+            dismissOnBackPress = !state.isInstalling,
+            dismissOnClickOutside = false,
+            usePlatformDefaultWidth = false,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xCC05070B))
+                .padding(horizontal = 48.dp, vertical = 24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .width(640.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Surface1)
+                    .border(1.5.dp, accentColor.copy(alpha = 0.55f), RoundedCornerShape(20.dp))
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                // Header
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Tv,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(26.dp),
+                    )
+                    Text(
+                        text = "Загрузка плейлиста и EPG с Веб-страницы",
+                        color = TextPrim,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                // Step instructions
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "1. Откройте в браузере телефона или ПК страницу:",
+                        color = TextSec,
+                        fontSize = 14.sp,
+                    )
+                    Text(
+                        text = "minogatvbox.duckdns.org",
+                        color = Color(0xFF00E5FF),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "2. Введите этот 4-значный код и установите Название, Плейлист и EPG:",
+                        color = TextSec,
+                        fontSize = 14.sp,
+                    )
+                }
+
+                // 4-Digit Code Display Boxes
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val digits = state.code.padEnd(4, '0').take(4)
+                    digits.forEach { ch ->
+                        Box(
+                            modifier = Modifier
+                                .size(width = 74.dp, height = 84.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFF080B12))
+                                .border(2.dp, accentColor, RoundedCornerShape(14.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = ch.toString(),
+                                color = accentColor,
+                                fontSize = 38.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+
+                // Live Status Box
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(accentColor.copy(alpha = 0.12f))
+                        .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    CircularProgressIndicator(
+                        color = accentColor,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text = state.statusText,
+                        color = TextPrim,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+
+                // Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(
+                        onClick = onRegenerateCode,
+                        enabled = !state.isInstalling,
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Icon(Icons.Filled.Refresh, contentDescription = null, tint = TextPrim, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Новый код", color = TextPrim, fontSize = 13.sp)
+                    }
+
+                    Button(
+                        onClick = onDismiss,
+                        enabled = !state.isInstalling,
+                        colors = ButtonDefaults.buttonColors(containerColor = Surface2),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.focusRequester(closeFocusRequester),
+                    ) {
+                        Text("Отмена", color = TextPrim, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1259,6 +1544,7 @@ private fun SectionHeader(title: String, actionLabel: String, onAction: () -> Un
 @Composable
 private fun EmptyPlaylistHint(
     onAdd: () -> Unit,
+    onLoadFromWeb: () -> Unit = {},
     onAddDemo: () -> Unit = {},
 ) {
     Column(
@@ -1272,7 +1558,7 @@ private fun EmptyPlaylistHint(
         Text("Нет подключенных плейлистов", color = TextPrim, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Добавьте свой M3U/Xtream плейлист или загрузите демо-каналы с запущенного бэкенда:",
+            "Загрузите плейлист и EPG с веб-страницы minogatvbox.duckdns.org в один клик или добавьте ссылку вручную:",
             color = TextSec,
             fontSize = 13.sp,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -1280,11 +1566,18 @@ private fun EmptyPlaylistHint(
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(
+                onClick = onLoadFromWeb,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Text("🌐 С minogatvbox.duckdns.org", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+            Button(
                 onClick = onAddDemo,
                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
                 shape = RoundedCornerShape(8.dp),
             ) {
-                Text("▶ Демо-каналы (Бэкенд)", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("▶ Демо-каналы", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
             OutlinedButton(
                 onClick = onAdd,
