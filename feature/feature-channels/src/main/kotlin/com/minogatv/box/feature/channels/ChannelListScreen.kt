@@ -104,6 +104,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.minogatv.box.feature.ui.RemoteControlHintBar
 import com.minogatv.box.feature.ui.RemoteHint
+import com.minogatv.box.feature.update.AppUpdateManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -170,7 +171,12 @@ fun ChannelListScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    val updateState by AppUpdateManager.state.collectAsState()
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        AppUpdateManager.checkForUpdates(context, force = false)
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     val listFocusRequester = remember { FocusRequester() }
     val sidePanelFocusRequester = remember { FocusRequester() }
@@ -407,6 +413,8 @@ fun ChannelListScreen(
                 isSettingsFocused = uiState.isSettingsFocused,
                 isSearchFocused = uiState.isSearchFocused,
                 isGroupFocused = uiState.isGroupFocused,
+                hasUpdateAvailable = updateState.isUpdateAvailable,
+                remoteVersionName = updateState.remoteInfo?.versionName,
                 isCompact = isCompactScreen,
                 isPortrait = isPortrait,
                 onSearchClick = { viewModel.onIntent(ChannelListIntent.OpenSearch) },
@@ -420,6 +428,87 @@ fun ChannelListScreen(
                     }
                 },
             )
+
+            // ── Subtle Update Available Banner (dismissible for session) ──────
+            AnimatedVisibility(
+                visible = updateState.isUpdateAvailable && !updateState.isBannerDismissed,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                val remoteVer = updateState.remoteInfo?.versionName ?: ""
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xE60B1E1A))
+                        .border(width = 0.8.dp, color = Color(0x6610B981))
+                        .padding(
+                            horizontal = if (isCompactScreen) 10.dp else 20.dp,
+                            vertical = if (isCompactScreen) 4.dp else 6.dp,
+                        ),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(onClick = onNavigateToSettings),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF10B981)),
+                        )
+                        Text(
+                            text = if (isPortrait) {
+                                "Доступна версия v$remoteVer — обновить в Настройках"
+                            } else {
+                                "Доступно обновление программы v$remoteVer — перейдите в «⚙ Настройки», чтобы установить"
+                            },
+                            color = Color(0xFFE8FFF6),
+                            fontSize = if (isCompactScreen) 11.5.sp else 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF10B981))
+                                .clickable(onClick = onNavigateToSettings)
+                                .padding(horizontal = 10.dp, vertical = 3.dp),
+                        ) {
+                            Text(
+                                text = "В настройки",
+                                color = Color.Black,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { AppUpdateManager.dismissBannerForSession() }
+                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                        ) {
+                            Text(
+                                text = "✕",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
 
             // ── EPG Sync Progress Bar UNDER TopBar (Search / Folders row) ─────
             val syncProgress = uiState.epgSyncProgress
@@ -1417,6 +1506,8 @@ private fun TopBar(
     isSettingsFocused: Boolean,
     isSearchFocused: Boolean,
     isGroupFocused: Boolean,
+    hasUpdateAvailable: Boolean = false,
+    remoteVersionName: String? = null,
     isCompact: Boolean = false,
     isPortrait: Boolean = false,
     onSearchClick: () -> Unit,
@@ -1622,10 +1713,20 @@ private fun TopBar(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
-                    .background(if (isSettingsFocused) Color(0x402979FF) else Color(0xCC131826))
+                    .background(
+                        when {
+                            isSettingsFocused -> Color(0x402979FF)
+                            hasUpdateAvailable -> Color(0x3310B981)
+                            else -> Color(0xCC131826)
+                        }
+                    )
                     .border(
                         width = if (isSettingsFocused) 2.dp else 1.dp,
-                        color = if (isSettingsFocused) ChannelDesignTokens.NeonCyan else Color(0x2B00E5FF),
+                        color = when {
+                            isSettingsFocused -> ChannelDesignTokens.NeonCyan
+                            hasUpdateAvailable -> Color(0xFF10B981)
+                            else -> Color(0x2B00E5FF)
+                        },
                         shape = RoundedCornerShape(10.dp),
                     )
                     .clickable(onClick = onSettingsClick)
@@ -1636,18 +1737,41 @@ private fun TopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(if (isCompact) 4.dp else 6.dp),
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = "Настройки",
-                    tint = if (isSettingsFocused) Color.White else ChannelDesignTokens.NeonCyan,
-                    modifier = Modifier.size(if (isCompact) 15.dp else 18.dp),
-                )
+                Box {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = "Настройки",
+                        tint = when {
+                            isSettingsFocused -> Color.White
+                            hasUpdateAvailable -> Color(0xFF10B981)
+                            else -> ChannelDesignTokens.NeonCyan
+                        },
+                        modifier = Modifier.size(if (isCompact) 15.dp else 18.dp),
+                    )
+                    if (hasUpdateAvailable) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .align(Alignment.TopEnd)
+                                .clip(CircleShape)
+                                .background(Color(0xFF10B981)),
+                        )
+                    }
+                }
                 if (!isPortrait) {
                     Text(
-                        text = "Настройки",
-                        color = if (isSettingsFocused) Color.White else TextPrimary,
+                        text = if (hasUpdateAvailable && !remoteVersionName.isNullOrBlank()) {
+                            "Настройки • v$remoteVersionName"
+                        } else {
+                            "Настройки"
+                        },
+                        color = when {
+                            isSettingsFocused -> Color.White
+                            hasUpdateAvailable -> Color(0xFF10B981)
+                            else -> TextPrimary
+                        },
                         fontSize = if (isCompact) 11.5.sp else 13.sp,
-                        fontWeight = if (isSettingsFocused) FontWeight.Bold else FontWeight.Medium,
+                        fontWeight = if (isSettingsFocused || hasUpdateAvailable) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1,
                         softWrap = false,
                     )

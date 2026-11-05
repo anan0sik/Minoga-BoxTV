@@ -64,7 +64,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.minogatv.box.feature.update.AppUpdateManager
+import com.minogatv.box.feature.update.AppUpdateState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -260,8 +266,26 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val pairingState by viewModel.webPairingState.collectAsState()
+    val updateState by AppUpdateManager.state.collectAsState()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val prefs = remember { context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE) }
+
+    LaunchedEffect(Unit) {
+        AppUpdateManager.checkForUpdates(context, force = false)
+    }
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                AppUpdateManager.onResumeCheckPendingInstall(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     var autoPlayLast by remember { mutableStateOf(prefs.getBoolean("auto_play_last_channel", false)) }
     var channelPreviewEnabled by remember { mutableStateOf(prefs.getBoolean("channel_preview_enabled", true)) }
@@ -326,6 +350,22 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
+
+            // ── Top Priority Banner if an Update is Available ──────────────
+            if (updateState.isUpdateAvailable) {
+                item {
+                    Spacer(Modifier.height(12.dp))
+                    AppUpdateSettingsCard(
+                        updateState = updateState,
+                        onCheckUpdates = {
+                            AppUpdateManager.checkForUpdates(context, force = true)
+                        },
+                        onDownloadAndInstall = {
+                            AppUpdateManager.downloadAndInstall(context)
+                        },
+                    )
+                }
+            }
 
             // ── Section header: Внешний вид и размер шрифта ───────────────
             item {
@@ -932,6 +972,37 @@ fun SettingsScreen(
                 }
             }
 
+            // ── Section header: Обновление программы ──────────────────────
+            item {
+                Text(
+                    text = "ОБНОВЛЕНИЕ ПРОГРАММЫ",
+                    color = Accent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+            }
+
+            item {
+                AppUpdateSettingsCard(
+                    updateState = updateState,
+                    onCheckUpdates = {
+                        AppUpdateManager.checkForUpdates(context, force = true) { hasUpdate ->
+                            val msg = if (hasUpdate) {
+                                "Найдена новая версия v${AppUpdateManager.state.value.remoteInfo?.versionName}!"
+                            } else {
+                                "У вас установлена последняя версия (${updateState.localVersionName})"
+                            }
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onDownloadAndInstall = {
+                        AppUpdateManager.downloadAndInstall(context)
+                    },
+                )
+            }
+
             item { Spacer(Modifier.height(24.dp)) }
         }
 
@@ -1146,6 +1217,161 @@ fun SettingsScreen(
             },
             onDismiss = { viewModel.stopWebPairingSession() },
         )
+    }
+}
+
+@Composable
+private fun AppUpdateSettingsCard(
+    updateState: AppUpdateState,
+    onCheckUpdates: () -> Unit,
+    onDownloadAndInstall: () -> Unit,
+) {
+    val hasUpdate = updateState.isUpdateAvailable
+    val remote = updateState.remoteInfo
+
+    SettingCardContainer(
+        modifier = if (hasUpdate) {
+            Modifier.border(
+                width = 1.5.dp,
+                color = Color(0xFF10B981),
+                shape = RoundedCornerShape(12.dp),
+            )
+        } else {
+            Modifier
+        },
+    ) { isFocused ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = if (hasUpdate) {
+                            "Доступна новая версия v${remote?.versionName}"
+                        } else {
+                            "Версия программы: ${updateState.localVersionName}"
+                        },
+                        color = when {
+                            hasUpdate -> Color(0xFF10B981)
+                            isFocused -> Color.White
+                            else -> TextPrim
+                        },
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (hasUpdate) Color(0x3310B981) else Surface2)
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = if (hasUpdate && remote != null) {
+                                "Сборка ${remote.versionCode}"
+                            } else {
+                                "Сборка ${updateState.localVersionCode}"
+                            },
+                            color = if (hasUpdate) Color(0xFF10B981) else Accent,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                val statusText = when {
+                    updateState.isChecking -> "Проверка наличия обновлений на сервере minogatvbox.duckdns.org…"
+                    updateState.isDownloading -> {
+                        val dlMb = AppUpdateManager.formatSizeMb(updateState.downloadedBytes)
+                        val totalMb = AppUpdateManager.formatSizeMb(updateState.totalBytes)
+                        "Скачивание обновления: $dlMb из $totalMb (${(updateState.downloadProgress * 100).toInt()}%)"
+                    }
+                    hasUpdate && remote != null -> {
+                        val sizeStr = AppUpdateManager.formatSizeMb(remote.sizeBytes)
+                        val sizePart = if (sizeStr.isNotBlank()) " ($sizeStr)" else ""
+                        "Текущая версия: ${updateState.localVersionName} → Новая: ${remote.versionName}$sizePart"
+                    }
+                    else -> "Установлена актуальная версия программы (сервер обновлений: minogatvbox.duckdns.org)"
+                }
+
+                Text(
+                    text = statusText,
+                    color = if (hasUpdate) Color(0xFFE0FFF4) else TextSec,
+                    fontSize = 12.sp,
+                )
+
+                updateState.errorMessage?.let { err ->
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = err,
+                        color = DangerRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (hasUpdate) {
+                    FocusableSettingButton(
+                        text = if (updateState.isDownloading) {
+                            "Загрузка ${(updateState.downloadProgress * 100).toInt()}%…"
+                        } else if (updateState.downloadedApkFile?.exists() == true) {
+                            "⬇ Установить v${remote?.versionName}"
+                        } else {
+                            "⬇ Скачать и установить"
+                        },
+                        isSelected = true,
+                        onClick = {
+                            if (!updateState.isDownloading) {
+                                onDownloadAndInstall()
+                            }
+                        },
+                    )
+                } else {
+                    FocusableSettingButton(
+                        text = if (updateState.isChecking) "Проверка…" else "🔄 Проверить обновления",
+                        isSelected = false,
+                        onClick = {
+                            if (!updateState.isChecking && !updateState.isDownloading) {
+                                onCheckUpdates()
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = updateState.isDownloading,
+            enter = expandVertically(),
+            exit = shrinkVertically(),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+            ) {
+                LinearProgressIndicator(
+                    progress = { updateState.downloadProgress },
+                    color = Color(0xFF10B981),
+                    trackColor = Color(0x3310B981),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                )
+            }
+        }
     }
 }
 
