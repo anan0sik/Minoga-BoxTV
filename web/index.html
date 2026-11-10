@@ -40,7 +40,7 @@
     }
 
     .container {
-      max-width: 680px;
+      max-width: 780px;
       margin: 0 auto;
     }
 
@@ -447,6 +447,311 @@
     }
     .apk-meta { display: block; margin-top: 6px; opacity: 0.75; font-size: 13px; }
     .download-steps { margin-top: 12px; }
+    .download-counter-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.14);
+      color: var(--archive-green);
+      border: 1px solid rgba(16, 185, 129, 0.38);
+      font-family: 'JetBrains Mono', Consolas, monospace;
+    }
+    .download-counter-pill strong {
+      font-size: 13px;
+      color: #34D399;
+    }
+
+    /* Features Grid */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .feature-item {
+      background: var(--surface-base);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 16px;
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+    .feature-item:hover {
+      border-color: rgba(0, 229, 255, 0.45);
+      transform: translateY(-2px);
+    }
+    .feature-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+    .feature-icon {
+      font-size: 18px;
+      line-height: 1;
+    }
+    .feature-text {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      line-height: 1.48;
+    }
+
+    /* Screenshots Gallery */
+    .screenshots-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .screenshot-card {
+      background: var(--surface-base);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.22s ease;
+    }
+    .screenshot-card:hover {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 8px 24px rgba(0, 229, 255, 0.16);
+      transform: translateY(-3px);
+    }
+    .screenshot-card.featured {
+      grid-column: span 2;
+    }
+    .screenshot-img-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #05070B;
+      overflow: hidden;
+    }
+    .screenshot-img-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform 0.3s ease;
+    }
+    .screenshot-card:hover .screenshot-img-wrap img {
+      transform: scale(1.02);
+    }
+    .screenshot-caption {
+      padding: 10px 14px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .screenshot-zoom-hint {
+      font-size: 11px;
+      color: var(--accent-cyan);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    /* Lightbox Modal */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(5, 7, 12, 0.92);
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .lightbox-content {
+      max-width: 1120px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+    .lightbox-img {
+      max-width: 100%;
+      max-height: 78vh;
+      border-radius: 14px;
+      border: 1.5px solid rgba(0, 229, 255, 0.45);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85);
+    }
+    .lightbox-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      max-width: 860px;
+      gap: 12px;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .lightbox-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    @media (max-width: 620px) {
+      .features-grid,
+      .screenshots-grid,
+      .msx-params-grid,
+      .msx-platforms-grid {
+        grid-template-columns: 1fr !important;
+      }
+      .screenshot-card.featured {
+        grid-column: span 1;
+      }
+    }
+
+    /* Media Station X Guide Styles */
+    .msx-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px 0 14px;
+    }
+    .msx-tab {
+      background: var(--surface-base);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      border-radius: 10px;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .msx-tab:hover {
+      border-color: rgba(0, 229, 255, 0.45);
+      color: var(--text-primary);
+    }
+    .msx-tab.active {
+      background: rgba(0, 229, 255, 0.14);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+      box-shadow: 0 0 14px rgba(0, 229, 255, 0.18);
+    }
+    .msx-panel {
+      display: none;
+      background: var(--surface-base);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .msx-panel.active {
+      display: block;
+    }
+    .msx-panel-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .msx-params-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin: 14px 0 18px;
+    }
+    .msx-param-card {
+      background: var(--surface-base);
+      border: 1.5px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 14px 16px;
+      transition: border-color 0.2s ease;
+    }
+    .msx-param-card.recommended {
+      border-color: rgba(0, 229, 255, 0.45);
+      background: linear-gradient(180deg, rgba(0, 229, 255, 0.06) 0%, rgba(14, 18, 27, 0.95) 100%);
+    }
+    .msx-param-badge {
+      display: inline-block;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      margin-bottom: 6px;
+      background: rgba(0, 229, 255, 0.15);
+      color: var(--accent-cyan);
+    }
+    .msx-param-badge.hub {
+      background: rgba(16, 185, 129, 0.16);
+      color: #34D399;
+    }
+    .msx-param-code-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      background: #07090E;
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 9px 12px;
+      margin: 8px 0;
+    }
+    .msx-param-code {
+      font-family: 'JetBrains Mono', Consolas, monospace;
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--accent-cyan);
+      user-select: all;
+      word-break: break-all;
+    }
+    .msx-copy-btn {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .msx-copy-btn:hover {
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+    .msx-path-flow {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin: 4px 0;
+    }
+    .msx-key {
+      display: inline-block;
+      background: var(--surface-elevated);
+      border: 1px solid rgba(0, 229, 255, 0.3);
+      color: var(--text-primary);
+      font-family: 'JetBrains Mono', Consolas, monospace;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
   </style>
 </head>
 <body>
@@ -454,7 +759,7 @@
     <!-- Шапка -->
     <header class="header">
       <div class="brand">
-        <div class="brand-logo">📺</div>
+        <img src="/download/icon.png" alt="Minoga TV" class="brand-logo" style="padding: 0; object-fit: cover;" onerror="this.outerHTML='<div class=\'brand-logo\'>📺</div>'" />
         <div>
           <div class="brand-title">Minoga TV Box</div>
           <div class="brand-subtitle">minogatvbox.duckdns.org</div>
@@ -470,6 +775,10 @@
     <section id="download-card" class="card">
       <div class="card-header">
         <span class="section-tag">📥 Скачать приложение для Android TV / Google TV</span>
+        <div class="download-counter-pill" title="Всего скачиваний приложения">
+          <span>📊 Скачиваний:</span>
+          <strong id="download-count-value">0</strong>
+        </div>
       </div>
       <p class="step-desc">
         Установите <strong>Minoga TV Box</strong> на приставку или телевизор с Android.
@@ -491,6 +800,164 @@
       </ul>
     </section>
 
+    <!-- Запуск на телевизорах LG, Samsung, других Smart TV и Windows через Media Station X -->
+    <section id="smarttv-card" class="card">
+      <div class="card-header">
+        <span class="section-tag">📺 LG, Samsung, Другие Smart TV и Windows (Media Station X)</span>
+        <span class="download-counter-pill" style="background: rgba(0, 229, 255, 0.12); color: var(--accent-cyan); border-color: rgba(0, 229, 255, 0.35);">
+          Smart TV + Windows · MSX
+        </span>
+      </div>
+      <p class="step-desc" style="margin-bottom: 12px;">
+        На телевизорах <strong>LG (webOS)</strong>, <strong>Samsung (Tizen)</strong>, <strong>Hisense (VIDAA)</strong>, <strong>Philips</strong>, <strong>Panasonic</strong>, а также на компьютерах <strong>Windows</strong> полноценный интерфейс <strong>Minoga TV Box</strong> (папки провайдера, живое превью 16:9, телепрограмма EPG, архив с перемоткой и выбор плеера) работает через официальное бесплатное приложение <strong>Media Station X (MSX)</strong> или напрямую в браузере:
+      </p>
+
+      <!-- Стартовый параметр для MSX -->
+      <div class="msx-params-grid" style="grid-template-columns: 1fr;">
+        <div class="msx-param-card recommended">
+          <span class="msx-param-badge">Стартовый параметр (Start Parameter)</span>
+          <div style="font-size: 13.5px; font-weight: 700; color: var(--text-primary);">Адрес для ввода в Media Station X (Settings ➔ Start Parameter ➔ Setup)</div>
+          <div class="msx-param-code-row">
+            <span class="msx-param-code" id="msx-param-direct">minogatvbox.duckdns.org</span>
+            <button type="button" class="msx-copy-btn" onclick="copyMsxParam('minogatvbox.duckdns.org', this)">📋 Копировать</button>
+          </div>
+          <div class="form-hint" style="margin-top: 2px;">При включении Media Station X запускается интерфейс Minoga TV Box.</div>
+        </div>
+      </div>
+
+      <!-- Переключатель инструкций по платформам -->
+      <div class="msx-tabs" role="tablist">
+        <button type="button" class="msx-tab active" onclick="switchMsxTab('lg', this)">📺 LG (webOS)</button>
+        <button type="button" class="msx-tab" onclick="switchMsxTab('samsung', this)">📺 Samsung (Tizen)</button>
+        <button type="button" class="msx-tab" onclick="switchMsxTab('other', this)">🌍 Другие ТВ (VIDAA / Philips / ТВ)</button>
+        <button type="button" class="msx-tab" onclick="switchMsxTab('windows', this)">💻 Windows / ПК</button>
+      </div>
+
+      <!-- Панель 1: LG (webOS) -->
+      <div id="msx-panel-lg" class="msx-panel active">
+        <div class="msx-panel-title">📺 Пошаговая настройка на телевизорах LG (webOS)</div>
+        <ul class="steps-list">
+          <li>
+            <span class="step-badge">1</span>
+            <span>Нажмите кнопку <strong>Home (Домик)</strong> на пульте LG и откройте магазин приложений <strong>LG Content Store</strong> (или <strong>Apps</strong>).</span>
+          </li>
+          <li>
+            <span class="step-badge">2</span>
+            <span>Через поиск найдите и установите бесплатное приложение <strong>Media Station X</strong>.</span>
+          </li>
+          <li>
+            <span class="step-badge">3</span>
+            <span>Запустите <strong>Media Station X</strong> и перейдите пультом в меню:
+              <span class="msx-path-flow">
+                <span class="msx-key">Settings (Настройки)</span> ➔
+                <span class="msx-key">Start Parameter</span> ➔
+                <span class="msx-key">Setup</span>
+              </span>
+            </span>
+          </li>
+          <li>
+            <span class="step-badge">4</span>
+            <span>Введите адрес <strong>minogatvbox.duckdns.org</strong> и нажмите галочку <strong>✔ (Да/OK)</strong>.</span>
+          </li>
+          <li>
+            <span class="step-badge">5</span>
+            <span>В открывшемся <strong>Minoga TV Box</strong> перейдите в <strong>⚙️ Настройки → Загрузить с Веб-страницы</strong>, получите <strong>4-значный код</strong> и введите его ниже на этой странице со смартфона или ПК!</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Панель 2: Samsung (Tizen) -->
+      <div id="msx-panel-samsung" class="msx-panel">
+        <div class="msx-panel-title">📺 Пошаговая настройка на телевизорах Samsung (Tizen)</div>
+        <ul class="steps-list">
+          <li>
+            <span class="step-badge">1</span>
+            <span>Нажмите кнопку <strong>Smart Hub (Домик)</strong> на пульте Samsung, перейдите в раздел <strong>Apps (Приложения)</strong> и нажмите на значок <strong>Поиска 🔍</strong> в правом верхнем углу.</span>
+          </li>
+          <li>
+            <span class="step-badge">2</span>
+            <span>Введите <strong>Media Station X</strong> и нажмите <strong>Установить</strong>.</span>
+          </li>
+          <li>
+            <span class="step-badge">3</span>
+            <span>Откройте <strong>Media Station X</strong> и выберите:
+              <span class="msx-path-flow">
+                <span class="msx-key">Settings</span> ➔
+                <span class="msx-key">Start Parameter</span> ➔
+                <span class="msx-key">Setup</span>
+              </span>
+            </span>
+          </li>
+          <li>
+            <span class="step-badge">4</span>
+            <span>Наберите на экранной клавиатуре <strong>minogatvbox.duckdns.org</strong> и подтвердите нажатием на <strong>✔</strong>.</span>
+          </li>
+          <li>
+            <span class="step-badge">5</span>
+            <span>После запуска приложения откройте <strong>⚙️ Настройки → Загрузить с Веб-страницы</strong> и привяжите свой плейлист и EPG по <strong>4-значному коду</strong> ниже на сайте.</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Панель 3: Другие телевизоры (Hisense VIDAA, Philips, Panasonic, Toshiba, Android TV) -->
+      <div id="msx-panel-other" class="msx-panel">
+        <div class="msx-panel-title">🌍 Телевизоры Hisense (VIDAA), Philips, Panasonic, Toshiba, Sony и др.</div>
+        <ul class="steps-list">
+          <li>
+            <span class="step-badge">1</span>
+            <span><strong>Через магазин приложений ТВ:</strong> откройте штатный магазин вашего телевизора (<strong>VIDAA App Store</strong>, <strong>App Gallery</strong>, <strong>VEWD / Opera TV Store</strong>, <strong>Google Play</strong> или <strong>Amazon Appstore</strong>) и установите <strong>Media Station X</strong>.</span>
+          </li>
+          <li>
+            <span class="step-badge">2</span>
+            <span>В <strong>Media Station X</strong> откройте <span class="msx-key">Settings</span> ➔ <span class="msx-key">Start Parameter</span> ➔ <span class="msx-key">Setup</span> и укажите <strong>minogatvbox.duckdns.org</strong>.</span>
+          </li>
+          <li>
+            <span class="step-badge">3</span>
+            <span><strong>Если Media Station X нет в магазине вашего ТВ:</strong> откройте встроенный <strong>Браузер</strong> телевизора, введите адрес <strong>msx.benzac.de</strong> (облачный клиент Media Station X) или сразу откройте прямую ссылку <strong>minogatvbox.duckdns.org/tv</strong> и добавьте её в закладки.</span>
+          </li>
+          <li>
+            <span class="step-badge">4</span>
+            <span>Для максимальной совместимости потоков в <strong>⚙️ Настройках</strong> предусмотрен выбор движка воспроизведения: <strong>Авто (HLS.js + HTML5)</strong>, <strong>Встроенный HTML5 Video</strong> или <strong>Нативный плеер Media Station X</strong>.</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- Панель 4: Windows / ПК -->
+      <div id="msx-panel-windows" class="msx-panel">
+        <div class="msx-panel-title">💻 Запуск на компьютерах и ноутбуках с Windows (и macOS / Linux)</div>
+        <ul class="steps-list">
+          <li>
+            <span class="step-badge">1</span>
+            <span><strong>Способ А — через приложение Media Station X на Windows:</strong> скачайте и установите официальный клиент <strong>Media Station X</strong> из магазина <strong>Microsoft Store</strong> (или с сайта разработчика <code>msx.benzac.de</code> для Windows / UWP).</span>
+          </li>
+          <li>
+            <span class="step-badge">2</span>
+            <span>В запущенном <strong>Media Station X</strong> перейдите в <span class="msx-key">Settings</span> ➔ <span class="msx-key">Start Parameter</span> ➔ <span class="msx-key">Setup</span> и введите <strong>minogatvbox.duckdns.org</strong>.</span>
+          </li>
+          <li>
+            <span class="step-badge">3</span>
+            <span><strong>Способ Б — напрямую в любом браузере Windows (без установки):</strong> нажмите кнопку <strong>«🚀 Открыть Веб-плеер (/tv)»</strong> ниже или введите в Chrome / Edge / Яндекс Браузере адрес <strong>minogatvbox.duckdns.org/tv</strong> (нажмите клавишу <span class="msx-key">F11</span> для полноэкранного режима).</span>
+          </li>
+          <li>
+            <span class="step-badge">4</span>
+            <span>На ПК поддерживается как управление <strong>мышью</strong>, так и <strong>клавиатурой</strong> (<span class="msx-key">Стрелки ◄ ▲ ▼ ►</span> — навигация и перемотка архива, <span class="msx-key">Enter</span> — выбор/инфо-бар, <span class="msx-key">Esc / Backspace</span> — шаг назад к списку и папкам).</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="download-row" style="margin-top: 8px;">
+        <a class="btn btn-primary download-btn" href="/tv/">
+          🚀 Открыть Веб-плеер (/tv)
+        </a>
+        <div class="short-link-box">
+          <div class="form-hint">Совет по управлению в Media Station X:</div>
+          <div style="font-size: 12.5px; color: var(--text-secondary); margin-top: 3px;">
+            Кнопка <strong>Back (Назад)</strong> возвращает из полноэкранного канала в список, а из списка — к папкам. При просмотре архива кнопки <strong>◄ Влево / Вправо ►</strong> перематывают передачу.
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ШАГ 1: Ввод 4-значного кода с экрана телевизора -->
     <section id="step-code-card" class="card active-step">
       <div class="card-header">
@@ -501,6 +968,7 @@
       </p>
 
       <form id="code-form" onsubmit="handleVerifyCode(event)">
+        <input type="text" id="pairing-hp-url" name="website_url" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;opacity:0;height:0;width:0;pointer-events:none;" />
         <div class="code-entry-wrapper">
           <div class="code-boxes">
             <input type="text" id="digit-0" class="code-digit" maxlength="1" inputmode="numeric" pattern="[0-9]" autocomplete="off" required />
@@ -517,10 +985,10 @@
       </form>
     </section>
 
-    <!-- ШАГ 2: Установка Названия, Плейлиста и EPG (открывается после ввода кода) -->
+    <!-- ШАГ 2: Установка Названия, Плейлиста, EPG и Медиатеки (открывается после ввода кода) -->
     <section id="step-setup-card" class="card active-step hidden">
       <div class="card-header">
-        <span class="section-tag">⚙️ Шаг 2 — Установите Название, Плейлист и EPG</span>
+        <span class="section-tag">⚙️ Шаг 2 — Настройка ТВ и Медиатеки</span>
       </div>
 
       <div class="connected-code-banner">
@@ -531,56 +999,153 @@
         <button type="button" class="btn btn-secondary btn-small" onclick="resetToCodeStep()">Сменить код</button>
       </div>
 
+      <div style="display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap;">
+        <button type="button" id="setup-sec-tab-tv" class="msx-tab active" style="flex: 1; justify-content: center; font-size: 14px; padding: 11px 16px;" onclick="setSetupSectionTab('TV')">
+          📺 Телеканалы и EPG
+        </button>
+        <button type="button" id="setup-sec-tab-vod" class="msx-tab" style="flex: 1; justify-content: center; font-size: 14px; padding: 11px 16px;" onclick="setSetupSectionTab('VOD')">
+          🎬 Медиатека (Портал фильмов)
+        </button>
+      </div>
+
       <form id="setup-form" onsubmit="handleSubmitConfig(event)">
-        <div class="form-group">
-          <label class="form-label" for="input-name">Название плейлиста *</label>
-          <input id="input-name"
-                 type="text"
-                 class="input-field"
-                 placeholder="Например: Minoga TV"
-                 value="Minoga TV"
-                 required />
+        <!-- Вкладка 1: Телеканалы и EPG -->
+        <div id="setup-section-tv">
+          <div class="form-group">
+            <label class="form-label" for="input-name">Название плейлиста *</label>
+            <input id="input-name"
+                   type="text"
+                   class="input-field"
+                   placeholder="Например: Minoga TV"
+                   value="Minoga TV" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">
+              <span>Источник плейлиста (M3U / M3U8) *</span>
+            </label>
+            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+              <button type="button" id="pl-tab-url" class="msx-tab active" style="flex: 1; justify-content: center;" onclick="setPlaylistInputMode('URL')">
+                🔗 По ссылке (URL)
+              </button>
+              <button type="button" id="pl-tab-file" class="msx-tab" style="flex: 1; justify-content: center;" onclick="setPlaylistInputMode('FILE')">
+                📂 Загрузить файл (.m3u / .m3u8)
+              </button>
+            </div>
+
+            <div id="playlist-url-box">
+              <div class="input-row">
+                <input id="input-playlist"
+                       type="url"
+                       class="input-field"
+                       placeholder="http://example.com/playlist.m3u8" />
+                <button type="button" class="btn btn-secondary btn-small" onclick="pasteInto('input-playlist')">📋 Вставить</button>
+              </div>
+              <div class="form-hint">Укажите прямую ссылку на ваш плейлист (.m3u, .m3u8 или ссылку провайдера).</div>
+            </div>
+
+            <div id="playlist-file-box" class="hidden">
+              <input id="input-playlist-file"
+                     type="file"
+                     accept=".m3u,.m3u8,.txt,audio/x-mpegurl,application/x-mpegurl,text/plain"
+                     style="display: none;"
+                     onchange="handlePlaylistFilePicked(event)" />
+              <div style="border: 1.5px dashed rgba(0, 229, 255, 0.45); border-radius: 14px; padding: 18px; text-align: center; background: rgba(7, 9, 14, 0.65); cursor: pointer;"
+                   onclick="document.getElementById('input-playlist-file').click()">
+                <div style="font-size: 28px; margin-bottom: 6px;">📂</div>
+                <div style="font-weight: 700; font-size: 14.5px; color: var(--text-primary); margin-bottom: 4px;">
+                  Нажмите, чтобы выбрать файл плейлиста (.m3u / .m3u8)
+                </div>
+                <div id="picked-file-status" style="font-size: 12.5px; color: var(--accent-cyan); font-weight: 600;">
+                  Файл не выбран (подойдёт любой файл .m3u или .m3u8 с телефона или ПК)
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="input-epg">
+              <span>Ссылка на телепрограмму EPG (.xml / .xml.gz)</span>
+            </label>
+            <div class="input-row">
+              <input id="input-epg"
+                     type="url"
+                     class="input-field"
+                     placeholder="http://epg.one/epg2.xml.gz"
+                     value="http://epg.one/epg2.xml.gz" />
+              <button type="button" class="btn btn-secondary btn-small" onclick="pasteInto('input-epg')">📋 Вставить</button>
+            </div>
+            <div class="presets-label">Быстрый выбор источника EPG:</div>
+            <div class="chips">
+              <button type="button" class="chip" onclick="setEpg('http://epg.one/epg2.xml.gz')">EPG.ONE (Основной)</button>
+              <button type="button" class="chip" onclick="setEpg('http://cdn.epg.one/epg2.xml.gz')">EPG.ONE CDN</button>
+              <button type="button" class="chip" onclick="setEpg('https://epg.it999.ru/edem.xml.gz')">IT999 Edem</button>
+              <button type="button" class="chip" onclick="setEpg('https://raw.githubusercontent.com/it999/it999.github.io/master/epg2.xml.gz')">IT999 GitHub</button>
+              <button type="button" class="chip" onclick="setEpg('https://epg.pw/xmltv/epg_RU.xml.gz')">EPG.PW (RU)</button>
+            </div>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label" for="input-playlist">
-            <span>Ссылка на плейлист (M3U / M3U8) *</span>
-          </label>
-          <div class="input-row">
-            <input id="input-playlist"
-                   type="url"
-                   class="input-field"
-                   placeholder="http://example.com/playlist.m3u8"
-                   required />
-            <button type="button" class="btn btn-secondary btn-small" onclick="pasteInto('input-playlist')">📋 Вставить</button>
+        <!-- Вкладка 2: Медиатека (Портал с фильмами и сериалами) -->
+        <div id="setup-section-vod" class="hidden">
+          <div style="background: rgba(0, 229, 255, 0.08); border: 1px solid rgba(0, 229, 255, 0.35); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; font-size: 13px; color: var(--text-secondary);">
+            🎬 <strong>Подключение портала Медиатеки (VOD):</strong> укажите параметры доступа к каталогу фильмов и сериалов от вашего провайдера (Stalker Portal, VPortal по ключу или Xtream Codes). Заполните те поля, которые выдал ваш провайдер.
           </div>
-          <div class="form-hint">Укажите прямую ссылку на ваш плейлист (.m3u, .m3u8 или ссылку провайдера).</div>
-        </div>
 
-        <div class="form-group">
-          <label class="form-label" for="input-epg">
-            <span>Ссылка на телепрограмму EPG (.xml / .xml.gz)</span>
-          </label>
-          <div class="input-row">
-            <input id="input-epg"
-                   type="url"
-                   class="input-field"
-                   placeholder="http://epg.one/epg2.xml.gz"
-                   value="http://epg.one/epg2.xml.gz" />
-            <button type="button" class="btn btn-secondary btn-small" onclick="pasteInto('input-epg')">📋 Вставить</button>
+          <div class="form-group">
+            <label class="form-label" for="input-vod-url">
+              <span>URL портала Медиатеки *</span>
+            </label>
+            <div class="input-row">
+              <input id="input-vod-url"
+                     type="text"
+                     class="input-field"
+                     placeholder="Например: https://... или portal::[key:...]http://..."
+                     oninput="autoParsePortalInput('input-vod-url')" />
+              <button type="button" class="btn btn-secondary btn-small" onclick="pasteInto('input-vod-url')">📋 Вставить</button>
+            </div>
+            <div class="form-hint">Адрес портала (URL) или полная строка VPortal из личного кабинета провайдера.</div>
           </div>
-          <div class="presets-label">Быстрый выбор источника EPG:</div>
-          <div class="chips">
-            <button type="button" class="chip" onclick="setEpg('http://epg.one/epg2.xml.gz')">EPG.ONE (Основной)</button>
-            <button type="button" class="chip" onclick="setEpg('http://cdn.epg.one/epg2.xml.gz')">EPG.ONE CDN</button>
-            <button type="button" class="chip" onclick="setEpg('https://epg.it999.ru/edem.xml.gz')">IT999 Edem</button>
-            <button type="button" class="chip" onclick="setEpg('https://raw.githubusercontent.com/it999/it999.github.io/master/epg2.xml.gz')">IT999 GitHub</button>
-            <button type="button" class="chip" onclick="setEpg('https://epg.pw/xmltv/epg_RU.xml.gz')">EPG.PW (RU)</button>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;">
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label class="form-label" for="input-vod-login">Логин (если есть)</label>
+              <input id="input-vod-login"
+                     type="text"
+                     class="input-field"
+                     placeholder="Логин от портала"
+                     autocomplete="off" />
+            </div>
+
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label class="form-label" for="input-vod-password">Пароль (если есть)</label>
+              <input id="input-vod-password"
+                     type="password"
+                     class="input-field"
+                     placeholder="Пароль от портала"
+                     autocomplete="off" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="input-vod-key">
+              <span>Ключ доступа (Key / VPortal Key, если есть)</span>
+            </label>
+            <div class="input-row">
+              <input id="input-vod-key"
+                     type="text"
+                     class="input-field"
+                     placeholder="Ключ доступа к видеотеке"
+                     autocomplete="off"
+                     oninput="autoParsePortalInput('input-vod-key')" />
+              <button type="button" class="btn btn-secondary btn-small" onclick="pasteInto('input-vod-key')">📋 Вставить</button>
+            </div>
+            <div class="form-hint">Ключ доступа из раздела «Плейлист / Видеотека / VPortal» вашего провайдера.</div>
           </div>
         </div>
 
         <button type="submit" id="submit-btn" class="btn btn-primary" style="margin-top: 10px;">
-          🚀 Установить Название, Плейлист и EPG на ТВ
+          🚀 Установить настройки на ТВ
         </button>
 
         <div id="setup-toast" class="toast"></div>
@@ -607,6 +1172,251 @@
         </li>
       </ul>
     </section>
+
+    <!-- Возможности программы -->
+    <section id="features-card" class="card">
+      <div class="card-header">
+        <span class="section-tag">✨ Возможности программы Minoga TV Box</span>
+      </div>
+      <p class="step-desc" style="margin-bottom: 6px;">
+        Современный IPTV-медиаплеер в стиле <strong>Obsidian Glassmorphism</strong>, созданный для телевизоров <strong>Android TV / Google TV</strong>, ТВ-приставок, смартфонов и планшетов.
+      </p>
+      <div class="features-grid">
+        <div class="feature-item">
+          <div class="feature-title">
+            <span class="feature-icon">🌐</span>
+            <span>Привязка плейлиста по 4-значному коду</span>
+          </div>
+          <div class="feature-text">
+            Никакого ручного ввода длинных ссылок с пульта ТВ — введите 4 цифры кода на этом сайте со смартфона или ПК, и плейлист с телепрограммой мгновенно загрузятся в приставку.
+          </div>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-title">
+            <span class="feature-icon">📺</span>
+            <span>Живое видео-превью (Live Preview 16:9)</span>
+          </div>
+          <div class="feature-text">
+            Предпросмотр выбранного канала в мини-окне прямо во время навигации по списку каналов и программе передач без прерывания обзора.
+          </div>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-title">
+            <span class="feature-icon">⏪</span>
+            <span>Телепрограмма (EPG) и Архив (Catch-up)</span>
+          </div>
+          <div class="feature-text">
+            Автоматическая синхронизация XMLTV / <code>.xml.gz</code> и поддержка всех популярных протоколов архива: <strong>Shift</strong>, <strong>Flussonic</strong>, <strong>Xtream Codes</strong> и <strong>Append</strong> с удобной перемоткой.
+          </div>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-title">
+            <span class="feature-icon">📁</span>
+            <span>Умные тематические папки и Поиск</span>
+          </div>
+          <div class="feature-text">
+            Автоматическая разбивка каналов по категориям («Все каналы», «Избранное», «Кино», «Спорт», «Детские», «Музыка», «Новости» и папки вашего провайдера) + мгновенный поиск по каналам и эфиру.
+          </div>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-title">
+            <span class="feature-icon">📱</span>
+            <span>Для Android TV и Смартфонов</span>
+          </div>
+          <div class="feature-text">
+            Полноценное управление пультом D-Pad на ТВ и гибридное сенсорное управление (касания + жесты виртуального пульта) с поддержкой вертикального и горизонтального режимов на смартфонах.
+          </div>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-title">
+            <span class="feature-icon">🔒</span>
+            <span>Безопасность, PiP, Бэкап и Автообновление</span>
+          </div>
+          <div class="feature-text">
+            Родительский контроль (18+) по PIN-коду, скрытие приватных ссылок плейлистов на экране, режим «Картинка в картинке» (PiP), резервное копирование в JSON и обновление в один клик из Настроек.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Скриншоты интерфейса -->
+    <section id="screenshots-card" class="card">
+      <div class="card-header">
+        <span class="section-tag">🖼️ Скриншоты интерфейса</span>
+        <span class="form-hint" style="margin-top: 0;">Нажмите на скриншот для увеличения (1080p)</span>
+      </div>
+
+      <div class="screenshots-grid">
+        <div class="screenshot-card featured" onclick="openLightbox(0)">
+          <div class="screenshot-img-wrap">
+            <img src="/download/screenshots/03_channels_epg.png" alt="Список каналов, Живое превью 16:9 и Телепрограмма с Архивом" loading="lazy" />
+          </div>
+          <div class="screenshot-caption">
+            <span>1. Список каналов + Живое превью 16:9 + Телепрограмма и Архив (АРХ)</span>
+            <span class="screenshot-zoom-hint">🔍 Увеличить</span>
+          </div>
+        </div>
+
+        <div class="screenshot-card" onclick="openLightbox(1)">
+          <div class="screenshot-img-wrap">
+            <img src="/download/screenshots/02_folders.png" alt="Главный экран: Сетка тематических папок" loading="lazy" />
+          </div>
+          <div class="screenshot-caption">
+            <span>2. Сетка тематических папок</span>
+            <span class="screenshot-zoom-hint">🔍</span>
+          </div>
+        </div>
+
+        <div class="screenshot-card" onclick="openLightbox(2)">
+          <div class="screenshot-img-wrap">
+            <img src="/download/screenshots/05_player.png" alt="Полноэкранный видеоплеер с инфо-баром передачи" loading="lazy" />
+          </div>
+          <div class="screenshot-caption">
+            <span>3. Видеоплеер и инфо-бар эфира</span>
+            <span class="screenshot-zoom-hint">🔍</span>
+          </div>
+        </div>
+
+        <div class="screenshot-card" onclick="openLightbox(3)">
+          <div class="screenshot-img-wrap">
+            <img src="/download/screenshots/04_settings.png" alt="Настройки: масштаб шрифта, загрузка по коду и защита ссылок" loading="lazy" />
+          </div>
+          <div class="screenshot-caption">
+            <span>4. Настройки и привязка с веб-страницы</span>
+            <span class="screenshot-zoom-hint">🔍</span>
+          </div>
+        </div>
+
+        <div class="screenshot-card" onclick="openLightbox(4)">
+          <div class="screenshot-img-wrap">
+            <img src="/download/screenshots/06_settings_update.png" alt="Резервное копирование и встроенное обновление программы" loading="lazy" />
+          </div>
+          <div class="screenshot-caption">
+            <span>5. Бэкап в JSON и обновление из Настроек</span>
+            <span class="screenshot-zoom-hint">🔍</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ⭐ Рейтинг, Отзывы и Вопросы разработчику -->
+    <section id="feedback-card" class="card">
+      <div class="card-header">
+        <span class="section-tag">⭐ Рейтинг, Отзывы и Вопросы разработчику</span>
+        <div class="download-counter-pill" style="background: rgba(245, 166, 35, 0.14); color: #FBBF24; border-color: rgba(245, 166, 35, 0.4);">
+          <span>Оценка пользователей:</span>
+          <strong id="fb-avg-badge" style="color: #FDE68A;">5.0 ★</strong>
+          <span id="fb-count-badge" style="opacity: 0.85;">(3)</span>
+        </div>
+      </div>
+
+      <p class="step-desc" style="margin-bottom: 14px;">
+        Поделитесь впечатлениями о работе <strong>Minoga TV Box</strong>, предложите идею или задайте вопрос разработчику. Ответ появится прямо здесь в вашем блоке и внутри приложения на вашем устройстве!
+      </p>
+
+      <!-- Личный блок автора: Мои обращения и ответы разработчика (виден только автору) -->
+      <div id="my-feedback-section" class="hidden" style="margin-bottom: 18px; padding: 16px; border-radius: 14px; background: rgba(0, 229, 255, 0.07); border: 1.5px solid rgba(0, 229, 255, 0.4);">
+        <div style="font-size: 14px; font-weight: 800; color: var(--accent-cyan); margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+          <span>🔔 Ваши обращения и ответы разработчика</span>
+        </div>
+        <div id="my-feedback-list"></div>
+      </div>
+
+      <!-- Форма отправки оценки / отзыва / вопроса -->
+      <form id="feedback-form" onsubmit="handleFeedbackSubmit(event)" style="background: var(--surface-base); border: 1px solid var(--border-subtle); border-radius: 14px; padding: 18px; margin-bottom: 18px;">
+        <div style="font-size: 14.5px; font-weight: 700; color: var(--text-primary); margin-bottom: 12px;">
+          ✍️ Оставить оценку, отзыв или задать вопрос
+        </div>
+
+        <!-- Выбор оценки 1..5 звёзд -->
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;">
+          <span style="font-size: 13px; color: var(--text-secondary); font-weight: 600;">Ваша оценка программы:</span>
+          <div id="star-picker" style="display: inline-flex; gap: 4px;">
+            <button type="button" class="star-btn" onclick="selectFeedbackStar(1)" style="background:none;border:none;font-size:26px;cursor:pointer;color:#F5A623;">★</button>
+            <button type="button" class="star-btn" onclick="selectFeedbackStar(2)" style="background:none;border:none;font-size:26px;cursor:pointer;color:#F5A623;">★</button>
+            <button type="button" class="star-btn" onclick="selectFeedbackStar(3)" style="background:none;border:none;font-size:26px;cursor:pointer;color:#F5A623;">★</button>
+            <button type="button" class="star-btn" onclick="selectFeedbackStar(4)" style="background:none;border:none;font-size:26px;cursor:pointer;color:#F5A623;">★</button>
+            <button type="button" class="star-btn" onclick="selectFeedbackStar(5)" style="background:none;border:none;font-size:26px;cursor:pointer;color:#F5A623;">★</button>
+          </div>
+          <span id="star-picker-label" style="font-size: 12.5px; color: #FBBF24; font-weight: 700;">5 из 5 — Отлично!</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-bottom: 10px;">
+          <div>
+            <label class="form-label" style="font-size: 12px;">Тип обращения</label>
+            <select id="fb-category" class="input-field" style="padding: 10px 12px;">
+              <option value="REVIEW">👍 Отзыв (Что нравится / не нравится)</option>
+              <option value="QUESTION">❓ Вопрос разработчику</option>
+              <option value="IDEA">💡 Идея / Предложение</option>
+              <option value="ISSUE">🛠 Сообщить о проблеме</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label" style="font-size: 12px;">Ваше устройство</label>
+            <select id="fb-device" class="input-field" style="padding: 10px 12px;">
+              <option value="Android TV / Приставка">📺 Android TV / Google TV приставка</option>
+              <option value="LG (webOS)">📺 Телевизор LG (Media Station X)</option>
+              <option value="Samsung (Tizen)">📺 Телевизор Samsung (Media Station X)</option>
+              <option value="Смартфон">📱 Смартфон / Планшет Android</option>
+              <option value="ПК / Windows">💻 Компьютер Windows / Браузер</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-bottom: 10px;">
+          <div>
+            <label class="form-label" style="font-size: 12px;">Ваше имя</label>
+            <input id="fb-name" type="text" class="input-field" placeholder="Например: Александр" maxlength="45" style="padding: 10px 12px;" />
+          </div>
+          <div>
+            <label class="form-label" style="font-size: 12px;">Telegram (@ник) или Email (необязательно, скрыто от всех)</label>
+            <input id="fb-contact" type="text" class="input-field" placeholder="Для личной связи при необходимости" maxlength="80" style="padding: 10px 12px;" />
+          </div>
+        </div>
+
+        <!-- Honeypot against bots -->
+        <input id="fb-website" type="text" style="display:none;" tabindex="-1" autocomplete="off" />
+
+        <div style="margin-bottom: 12px;">
+          <label class="form-label" style="font-size: 12px;">Текст отзыва или вопроса *</label>
+          <textarea id="fb-text" class="input-field" rows="3" placeholder="Напишите, что вам нравится в программе, что хотелось бы улучшить или задайте вопрос..." required maxlength="1500" style="resize: vertical; min-height: 76px;"></textarea>
+        </div>
+
+        <button type="submit" id="fb-submit-btn" class="btn btn-primary" style="max-width: 320px;">
+          📨 Отправить разработчику
+        </button>
+        <div id="fb-toast" class="toast"></div>
+      </form>
+
+      <!-- Фильтр публичной ленты -->
+      <div class="msx-tabs" style="margin-top: 4px; margin-bottom: 12px;">
+        <button type="button" class="msx-tab fb-filter-tab active" onclick="setPublicFeedbackFilter('ALL', this)">Все отзывы и вопросы</button>
+        <button type="button" class="msx-tab fb-filter-tab" onclick="setPublicFeedbackFilter('QUESTION', this)">❓ Вопросы и ответы</button>
+        <button type="button" class="msx-tab fb-filter-tab" onclick="setPublicFeedbackFilter('REVIEW', this)">⭐ Отзывы пользователей</button>
+      </div>
+
+      <div id="public-feedback-list" style="display: flex; flex-direction: column; gap: 12px;"></div>
+    </section>
+  </div>
+
+  <!-- Модальное окно просмотра скриншотов (Lightbox) -->
+  <div id="lightbox-modal" class="lightbox hidden" onclick="handleLightboxBackdrop(event)">
+    <div class="lightbox-content">
+      <img id="lightbox-image" class="lightbox-img" src="" alt="Screenshot" />
+      <div class="lightbox-bar">
+        <span id="lightbox-caption"></span>
+        <div class="lightbox-controls">
+          <button type="button" class="btn btn-secondary btn-small" onclick="stepLightbox(-1)">◀ Пред.</button>
+          <button type="button" class="btn btn-secondary btn-small" onclick="stepLightbox(1)">След. ▶</button>
+          <button type="button" class="btn btn-secondary btn-small" onclick="closeLightbox()">✕ Закрыть</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -621,6 +1431,87 @@
           `Версия ${info.versionName} · ${sizeMb} МБ` + (date ? ` · обновлено ${date}` : '');
       })
       .catch(() => {});
+
+    // Счётчик скачиваний APK
+    function refreshDownloadCounter() {
+      fetch('/api/downloads/stats', { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data && typeof data.downloads === 'number') {
+            const el = document.getElementById('download-count-value');
+            if (el) el.textContent = data.downloads.toLocaleString('ru-RU');
+          }
+        })
+        .catch(() => {});
+    }
+    refreshDownloadCounter();
+
+    const apkBtn = document.getElementById('apk-download-btn');
+    if (apkBtn) {
+      apkBtn.addEventListener('click', () => {
+        setTimeout(refreshDownloadCounter, 1200);
+      });
+    }
+
+    // Lightbox галереи скриншотов
+    const galleryItems = [
+      {
+        src: '/download/screenshots/03_channels_epg.png',
+        caption: '1/5 — Список каналов, живое превью 16:9 и телепрограмма с архивом (Catch-up)'
+      },
+      {
+        src: '/download/screenshots/02_folders.png',
+        caption: '2/5 — Главный экран: умная сетка тематических папок'
+      },
+      {
+        src: '/download/screenshots/05_player.png',
+        caption: '3/5 — Полноэкранный видеоплеер с инфо-баром текущей передачи'
+      },
+      {
+        src: '/download/screenshots/04_settings.png',
+        caption: '4/5 — Экран настроек: масштаб шрифта, загрузка по 4-значному коду и защита ссылки на плейлист'
+      },
+      {
+        src: '/download/screenshots/06_settings_update.png',
+        caption: '5/5 — Родительский контроль, резервное копирование в JSON и встроенное обновление программы'
+      }
+    ];
+    let currentLightboxIdx = 0;
+
+    function openLightbox(idx) {
+      currentLightboxIdx = idx;
+      updateLightboxView();
+      document.getElementById('lightbox-modal').classList.remove('hidden');
+    }
+
+    function closeLightbox() {
+      document.getElementById('lightbox-modal').classList.add('hidden');
+    }
+
+    function stepLightbox(delta) {
+      currentLightboxIdx = (currentLightboxIdx + delta + galleryItems.length) % galleryItems.length;
+      updateLightboxView();
+    }
+
+    function updateLightboxView() {
+      const item = galleryItems[currentLightboxIdx];
+      document.getElementById('lightbox-image').src = item.src;
+      document.getElementById('lightbox-caption').textContent = item.caption;
+    }
+
+    function handleLightboxBackdrop(e) {
+      if (e.target && e.target.id === 'lightbox-modal') {
+        closeLightbox();
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      const modal = document.getElementById('lightbox-modal');
+      if (modal.classList.contains('hidden')) return;
+      if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowRight') stepLightbox(1);
+      if (e.key === 'ArrowLeft') stepLightbox(-1);
+    });
 
     let currentVerifiedCode = '';
     const digitInputs = [
@@ -676,6 +1567,21 @@
       if (el) el.className = 'toast';
     }
 
+    let humanInteractionDetected = false;
+    ['keydown', 'pointerdown', 'touchstart', 'mousemove', 'focusin', 'input'].forEach(ev => {
+      window.addEventListener(ev, () => { humanInteractionDetected = true; }, { once: true, passive: true });
+    });
+
+    function computeAntiBotToken(code, salt) {
+      let h = 2166136261;
+      const s = 'minoga_human_' + code + '_' + salt;
+      for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return (h >>> 0).toString(16);
+    }
+
     async function handleVerifyCode(event) {
       event.preventDefault();
       hideToast('code-toast');
@@ -685,6 +1591,11 @@
         return;
       }
 
+      const hpEl = document.getElementById('pairing-hp-url');
+      const hpVal = hpEl ? hpEl.value : '';
+      const salt = String(Date.now());
+      const bt = computeAntiBotToken(code, salt);
+
       const btn = document.getElementById('verify-btn');
       btn.disabled = true;
       btn.textContent = 'Проверка кода...';
@@ -693,7 +1604,7 @@
         const res = await fetch('/api/code/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: code })
+          body: JSON.stringify({ code: code, website_url: hpVal, _ts: salt, _bt: bt })
         });
         const data = await res.json().catch(() => ({}));
 
@@ -728,9 +1639,28 @@
         if (saved.name) document.getElementById('input-name').value = saved.name;
         if (saved.playlistUrl) document.getElementById('input-playlist').value = saved.playlistUrl;
         if (saved.epgUrl) document.getElementById('input-epg').value = saved.epgUrl;
+        if (saved.vodUrl) document.getElementById('input-vod-url').value = saved.vodUrl;
+        if (saved.vodLogin) document.getElementById('input-vod-login').value = saved.vodLogin;
+        if (saved.vodKey) document.getElementById('input-vod-key').value = saved.vodKey;
       } catch (e) {}
 
       document.getElementById('input-playlist').focus();
+    }
+
+    let activeSetupSection = 'TV'; // 'TV' | 'VOD'
+
+    function setSetupSectionTab(tab) {
+      activeSetupSection = tab;
+      document.getElementById('setup-sec-tab-tv').classList.toggle('active', tab === 'TV');
+      document.getElementById('setup-sec-tab-vod').classList.toggle('active', tab === 'VOD');
+      document.getElementById('setup-section-tv').classList.toggle('hidden', tab !== 'TV');
+      document.getElementById('setup-section-vod').classList.toggle('hidden', tab !== 'VOD');
+      const btn = document.getElementById('submit-btn');
+      if (btn && !btn.disabled) {
+        btn.textContent = tab === 'VOD'
+          ? '🚀 Отправить настройки Медиатеки на ТВ'
+          : '🚀 Установить настройки на ТВ';
+      }
     }
 
     function resetToCodeStep() {
@@ -748,6 +1678,64 @@
       digitInputs[0].focus();
     }
 
+    let playlistInputMode = 'URL'; // 'URL' | 'FILE'
+    let pickedPlaylistFileContent = '';
+    let pickedPlaylistFileName = '';
+
+    function setPlaylistInputMode(mode) {
+      playlistInputMode = mode;
+      document.getElementById('pl-tab-url').classList.toggle('active', mode === 'URL');
+      document.getElementById('pl-tab-file').classList.toggle('active', mode === 'FILE');
+      document.getElementById('playlist-url-box').classList.toggle('hidden', mode !== 'URL');
+      document.getElementById('playlist-file-box').classList.toggle('hidden', mode !== 'FILE');
+    }
+
+    function handlePlaylistFilePicked(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      pickedPlaylistFileName = file.name;
+      const statusEl = document.getElementById('picked-file-status');
+      statusEl.textContent = 'Чтение файла ' + file.name + '…';
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const text = String(e.target.result || '');
+        pickedPlaylistFileContent = text;
+        const matches = text.match(/#EXTINF/gi);
+        const count = matches ? matches.length : 0;
+        statusEl.textContent = '✅ Выбран файл: ' + file.name + (count > 0 ? (' (Найдено каналов: ' + count + ')') : '');
+        const nameInput = document.getElementById('input-name');
+        if (nameInput && (!nameInput.value.trim() || nameInput.value.trim() === 'Minoga TV')) {
+          nameInput.value = file.name.replace(/\.(m3u8|m3u|txt)$/i, '');
+        }
+      };
+      reader.onerror = function() {
+        pickedPlaylistFileContent = '';
+        statusEl.textContent = '❌ Ошибка чтения файла';
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
+
+    function autoParsePortalInput(sourceId) {
+      const el = document.getElementById(sourceId);
+      if (!el) return;
+      const val = (el.value || '').trim();
+      const m = val.match(/^(?:https?:\/\/)?portal::(?:\[([^\]]*)\])?\s*(https?:\/\/.+)$/i);
+      if (!m) return;
+      const bracket = m[1] || '';
+      const cleanUrl = (m[2] || '').trim();
+      let extractedKey = '';
+      bracket.split(';').forEach(part => {
+        if (part.trim().toLowerCase().startsWith('key:')) {
+          extractedKey = part.trim().substring(4).trim();
+        }
+      });
+      const urlEl = document.getElementById('input-vod-url');
+      const keyEl = document.getElementById('input-vod-key');
+      if (urlEl && cleanUrl) urlEl.value = cleanUrl;
+      if (keyEl && extractedKey) keyEl.value = extractedKey;
+    }
+
     async function handleSubmitConfig(event) {
       event.preventDefault();
       hideToast('setup-toast');
@@ -757,24 +1745,60 @@
         return;
       }
 
+      autoParsePortalInput('input-vod-url');
+      autoParsePortalInput('input-vod-key');
+
       const name = document.getElementById('input-name').value.trim() || 'Minoga TV';
-      const playlistUrl = document.getElementById('input-playlist').value.trim();
+      let playlistUrl = document.getElementById('input-playlist').value.trim();
       const epgUrl = document.getElementById('input-epg').value.trim() || 'http://epg.one/epg2.xml.gz';
-
-      if (!playlistUrl) {
-        showToast('setup-toast', 'Укажите ссылку на плейлист', 'error');
-        return;
-      }
-
-      try {
-        localStorage.setItem('minoga_last_setup', JSON.stringify({ name, playlistUrl, epgUrl }));
-      } catch (e) {}
+      const vodUrl = (document.getElementById('input-vod-url').value || '').trim();
+      const vodLogin = (document.getElementById('input-vod-login').value || '').trim();
+      const vodPassword = (document.getElementById('input-vod-password').value || '').trim();
+      const vodKey = (document.getElementById('input-vod-key').value || '').trim();
 
       const btn = document.getElementById('submit-btn');
       btn.disabled = true;
-      btn.textContent = 'Отправка в приложение...';
 
       try {
+        if (playlistInputMode === 'FILE' && pickedPlaylistFileContent) {
+          btn.textContent = 'Загрузка файла плейлиста на сервер...';
+          const upRes = await fetch('/api/playlist/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            body: pickedPlaylistFileContent
+          });
+          const upData = await upRes.json().catch(() => ({}));
+          if (!upRes.ok || !upData.playlistUrl) {
+            showToast('setup-toast', upData.error || 'Не удалось загрузить файл плейлиста', 'error');
+            btn.disabled = false;
+            btn.textContent = activeSetupSection === 'VOD' ? '🚀 Отправить настройки Медиатеки на ТВ' : '🚀 Установить настройки на ТВ';
+            return;
+          }
+          playlistUrl = upData.playlistUrl;
+        }
+
+        if (!playlistUrl && !vodUrl && !vodKey) {
+          if (activeSetupSection === 'VOD') {
+            showToast('setup-toast', 'Укажите URL портала или Ключ доступа к Медиатеке', 'error');
+          } else {
+            showToast('setup-toast', 'Укажите ссылку на плейлист, загрузите файл или заполните вкладку «Медиатека»', 'error');
+          }
+          btn.disabled = false;
+          btn.textContent = activeSetupSection === 'VOD' ? '🚀 Отправить настройки Медиатеки на ТВ' : '🚀 Установить настройки на ТВ';
+          return;
+        }
+
+        try {
+          localStorage.setItem('minoga_last_setup', JSON.stringify({ name, playlistUrl, epgUrl, vodUrl, vodLogin, vodKey }));
+        } catch (e) {}
+
+        btn.textContent = 'Отправка в приложение...';
+
+        const hpEl = document.getElementById('pairing-hp-url');
+        const hpVal = hpEl ? hpEl.value : '';
+        const salt = String(Date.now());
+        const bt = computeAntiBotToken(currentVerifiedCode, salt);
+
         const res = await fetch('/api/code/submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -782,17 +1806,23 @@
             code: currentVerifiedCode,
             name: name,
             playlistUrl: playlistUrl,
-            epgUrl: epgUrl
+            epgUrl: epgUrl,
+            vodUrl: vodUrl,
+            vodLogin: vodLogin,
+            vodPassword: vodPassword,
+            vodKey: vodKey,
+            website_url: hpVal,
+            _ts: salt,
+            _bt: bt
           })
         });
         const data = await res.json().catch(() => ({}));
 
         if (res.ok) {
-          showToast(
-            'setup-toast',
-            '✅ Успешно отправлено! Приложение на ТВ уже загружает плейлист «' + name + '» и телепрограмму EPG.',
-            'success'
-          );
+          const msg = (vodUrl || vodKey) && !playlistUrl
+            ? '✅ Настройки Медиатеки успешно отправлены на телевизор!'
+            : '✅ Успешно отправлено! Приложение на ТВ уже принимает настройки.';
+          showToast('setup-toast', msg, 'success');
         } else {
           showToast('setup-toast', data.error || 'Ошибка отправки данных по коду', 'error');
         }
@@ -800,7 +1830,7 @@
         showToast('setup-toast', 'Ошибка соединения с сервером', 'error');
       } finally {
         btn.disabled = false;
-        btn.textContent = '🚀 Установить Название, Плейлист и EPG на ТВ';
+        btn.textContent = activeSetupSection === 'VOD' ? '🚀 Отправить настройки Медиатеки на ТВ' : '🚀 Установить настройки на ТВ';
       }
     }
 
@@ -813,13 +1843,223 @@
         const text = await navigator.clipboard.readText();
         if (text) {
           document.getElementById(inputId).value = text.trim();
+          if (inputId === 'input-vod-url' || inputId === 'input-vod-key') {
+            autoParsePortalInput(inputId);
+          }
         }
       } catch (e) {
         alert('Вставьте ссылку вручную (долгое нажатие или Ctrl+V)');
       }
     }
 
+    function switchMsxTab(tabId, btnEl) {
+      document.querySelectorAll('#smarttv-card .msx-tab').forEach(el => el.classList.remove('active'));
+      if (btnEl) btnEl.classList.add('active');
+      document.querySelectorAll('#smarttv-card .msx-panel').forEach(el => el.classList.remove('active'));
+      const panel = document.getElementById('msx-panel-' + tabId);
+      if (panel) panel.classList.add('active');
+    }
+
+    async function copyMsxParam(text, btnEl) {
+      try {
+        await navigator.clipboard.writeText(text);
+        if (btnEl) {
+          const orig = btnEl.textContent;
+          btnEl.textContent = '✅ Скопировано';
+          setTimeout(() => { btnEl.textContent = orig; }, 1800);
+        }
+      } catch (e) {
+        alert('Скопируйте адрес вручную: ' + text);
+      }
+    }
+
+    // ─── Feedback, Ratings & Q&A Showcase ──────────────────────────────────────
+    let selectedFeedbackRating = 5;
+    let publicFeedbackItems = [];
+    let publicFeedbackFilter = 'ALL';
+
+    const STAR_LABELS = {
+      1: '1 из 5 — Плохо',
+      2: '2 из 5 — Есть проблемы',
+      3: '3 из 5 — Нормально',
+      4: '4 из 5 — Хорошо',
+      5: '5 из 5 — Отлично!'
+    };
+
+    const FB_CAT_BADGES = {
+      REVIEW: { label: '👍 Отзыв', color: '#34D399' },
+      QUESTION: { label: '❓ Вопрос', color: '#00E5FF' },
+      IDEA: { label: '💡 Идея', color: '#FBBF24' },
+      ISSUE: { label: '🛠 Обращение', color: '#F87171' }
+    };
+
+    function getOrCreateFeedbackClientId() {
+      try {
+        let cid = localStorage.getItem('minoga_feedback_client_id');
+        if (!cid) {
+          cid = 'cl_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 9);
+          localStorage.setItem('minoga_feedback_client_id', cid);
+        }
+        return cid;
+      } catch (e) {
+        return 'cl_guest';
+      }
+    }
+
+    function escapeHtmlSafe(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function selectFeedbackStar(rating) {
+      selectedFeedbackRating = rating;
+      const btns = document.querySelectorAll('#star-picker .star-btn');
+      btns.forEach((btn, idx) => {
+        btn.style.color = (idx < rating) ? '#F5A623' : '#334155';
+        btn.textContent = (idx < rating) ? '★' : '☆';
+      });
+      const lbl = document.getElementById('star-picker-label');
+      if (lbl) lbl.textContent = STAR_LABELS[rating] || '';
+    }
+
+    function renderFeedbackItemCard(it, isMine) {
+      const cat = FB_CAT_BADGES[it.category] || FB_CAT_BADGES.REVIEW;
+      const stars = '★'.repeat(it.rating || 5) + '☆'.repeat(5 - (it.rating || 5));
+      const dt = it.createdAt ? new Date(it.createdAt).toLocaleDateString('ru-RU') : '';
+      const statusPill = isMine
+        ? (it.replyText
+            ? '<span style="font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:6px; background:rgba(16,185,129,0.2); color:#34D399;">📩 Получен ответ разработчика</span>'
+            : '<span style="font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:6px; background:rgba(0,229,255,0.16); color:var(--accent-cyan);">✓ Отправлено разработчику</span>')
+        : '';
+
+      const replyHtml = it.replyText
+        ? '<div style="margin-top: 10px; padding: 12px 14px; border-radius: 10px; background: rgba(0, 229, 255, 0.09); border-left: 3px solid var(--accent-cyan);">' +
+            '<div style="font-size: 12px; font-weight: 800; color: var(--accent-cyan); margin-bottom: 4px;">👨‍💻 Ответ разработчика Minoga TV:</div>' +
+            '<div style="font-size: 13.5px; color: var(--text-primary); line-height: 1.48; white-space: pre-wrap;">' + escapeHtmlSafe(it.replyText) + '</div>' +
+          '</div>'
+        : '';
+
+      return '<div style="background: var(--surface-base); border: 1px solid ' + (isMine && it.replyText ? 'rgba(0,229,255,0.5)' : 'var(--border-subtle)') + '; border-radius: 14px; padding: 14px 16px;">' +
+        '<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">' +
+          '<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">' +
+            '<strong style="font-size: 14px; color: var(--text-primary);">' + escapeHtmlSafe(it.authorName || 'Пользователь') + '</strong>' +
+            '<span style="color: #F5A623; font-size: 13.5px; font-weight: 800;">' + stars + '</span>' +
+            '<span style="font-size: 11.5px; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.06); color: var(--text-secondary);">' + escapeHtmlSafe(it.deviceType || '') + '</span>' +
+            '<span style="font-size: 11.5px; font-weight: 700; color: ' + cat.color + ';">' + cat.label + '</span>' +
+          '</div>' +
+          '<div style="display: flex; align-items: center; gap: 8px;">' +
+            statusPill +
+            '<span style="font-size: 12px; color: var(--text-secondary);">' + dt + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div style="font-size: 13.5px; color: var(--text-primary); line-height: 1.5; white-space: pre-wrap;">' + escapeHtmlSafe(it.text || '') + '</div>' +
+        replyHtml +
+      '</div>';
+    }
+
+    function renderPublicFeedbackList() {
+      const container = document.getElementById('public-feedback-list');
+      if (!container) return;
+      const filtered = publicFeedbackItems.filter(it => {
+        if (publicFeedbackFilter === 'QUESTION') return it.category === 'QUESTION' || Boolean(it.replyText);
+        if (publicFeedbackFilter === 'REVIEW') return it.category === 'REVIEW';
+        return true;
+      });
+      if (filtered.length === 0) {
+        container.innerHTML = '<div style="text-align:center; padding: 18px; color: var(--text-secondary); font-size: 13px;">В этой вкладке пока нет записей.</div>';
+        return;
+      }
+      container.innerHTML = filtered.map(it => renderFeedbackItemCard(it, false)).join('');
+    }
+
+    function setPublicFeedbackFilter(filter, btnEl) {
+      publicFeedbackFilter = filter;
+      document.querySelectorAll('.fb-filter-tab').forEach(b => b.classList.remove('active'));
+      if (btnEl) btnEl.classList.add('active');
+      renderPublicFeedbackList();
+    }
+
+    async function loadPublicFeedback() {
+      try {
+        const cid = getOrCreateFeedbackClientId();
+        const res = await fetch('/api/feedback/public?clientId=' + encodeURIComponent(cid), { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.stats) {
+          const avgEl = document.getElementById('fb-avg-badge');
+          const cntEl = document.getElementById('fb-count-badge');
+          if (avgEl) avgEl.textContent = Number(data.stats.averageRating || 5.0).toFixed(1) + ' ★';
+          if (cntEl) cntEl.textContent = '(' + (data.stats.totalCount || 0) + ')';
+        }
+        const mySec = document.getElementById('my-feedback-section');
+        const myList = document.getElementById('my-feedback-list');
+        const mine = Array.isArray(data.myItems) ? data.myItems : [];
+        if (mySec && myList) {
+          if (mine.length > 0) {
+            mySec.classList.remove('hidden');
+            myList.innerHTML = '<div style="display:flex; flex-direction:column; gap:10px;">' +
+              mine.map(it => renderFeedbackItemCard(it, true)).join('') +
+            '</div>';
+          } else {
+            mySec.classList.add('hidden');
+          }
+        }
+        publicFeedbackItems = Array.isArray(data.publicItems) ? data.publicItems : [];
+        renderPublicFeedbackList();
+      } catch (e) {}
+    }
+
+    async function handleFeedbackSubmit(e) {
+      e.preventDefault();
+      const btn = document.getElementById('fb-submit-btn');
+      const toast = document.getElementById('fb-toast');
+      const text = document.getElementById('fb-text').value.trim();
+      if (!text) return;
+
+      btn.disabled = true;
+      const payload = {
+        clientId: getOrCreateFeedbackClientId(),
+        authorName: document.getElementById('fb-name').value.trim() || 'Пользователь',
+        deviceType: document.getElementById('fb-device').value,
+        category: document.getElementById('fb-category').value,
+        rating: selectedFeedbackRating,
+        text: text,
+        contact: document.getElementById('fb-contact').value.trim(),
+        website: document.getElementById('fb-website').value
+      };
+
+      try {
+        const res = await fetch('/api/feedback/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          document.getElementById('fb-text').value = '';
+          toast.className = 'toast success';
+          toast.style.display = 'block';
+          toast.textContent = '✅ Спасибо! Ваше обращение отправлено разработчику. Когда разработчик ответит, ответ появится выше в блоке «Ваши обращения»!';
+          await loadPublicFeedback();
+        } else {
+          toast.className = 'toast error';
+          toast.style.display = 'block';
+          toast.textContent = data.error || 'Не удалось отправить сообщение';
+        }
+      } catch (err) {
+        toast.className = 'toast error';
+        toast.style.display = 'block';
+        toast.textContent = 'Ошибка соединения с сервером';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
+      loadPublicFeedback();
       // Allow ?code=1234 in URL query string for quick opening
       const params = new URLSearchParams(window.location.search);
       const urlCode = (params.get('code') || '').replace(/\D/g, '').slice(0, 4);

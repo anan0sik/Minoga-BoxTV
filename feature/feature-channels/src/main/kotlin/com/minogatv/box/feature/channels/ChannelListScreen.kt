@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -167,6 +168,7 @@ private val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
 fun ChannelListScreen(
     onNavigateToPlayer: (channelId: Long, catchupStartMs: Long?) -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToVod: () -> Unit = {},
     viewModel: ChannelListViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -184,7 +186,7 @@ fun ChannelListScreen(
     val screenKeyDispatcher = LocalScreenKeyDispatcher.current
     val currentUiState by rememberUpdatedState(uiState)
 
-    // ── Live Preview background player (muted, low overhead, hardware codec safe) ──
+    // ── Live Preview background player (muted, audio renderer disabled so Bluetooth A2DP is never hijacked) ──
     val previewPlayer = remember(context) {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -195,8 +197,23 @@ fun ChannelListScreen(
             )
             .build()
 
+        val previewTrackSelector = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(context).apply {
+            setParameters(
+                buildUponParameters()
+                    .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, true)
+                    .setTunnelingEnabled(false)
+            )
+        }
+
+        val previewAudioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build()
+
         ExoPlayer.Builder(context)
             .setLoadControl(loadControl)
+            .setTrackSelector(previewTrackSelector)
+            .setAudioAttributes(previewAudioAttributes, /* handleAudioFocus = */ false)
             .build().apply {
                 volume = 0f
                 playWhenReady = true
@@ -232,7 +249,7 @@ fun ChannelListScreen(
             prefs.unregisterOnSharedPreferenceChangeListener(listener)
         }
     }
-    val scaleFactor = (uiScalePercent / 100f).coerceIn(0.4f, 1.0f)
+    val scaleFactor = (uiScalePercent / 100f).coerceIn(0.4f, 3.0f)
     val configuration = LocalConfiguration.current
     val isPortrait = configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT
     val isCompactScreen = isPortrait || configuration.screenHeightDp < 500 || configuration.screenWidthDp < 750
@@ -298,11 +315,12 @@ fun ChannelListScreen(
     }
 
     // ── KeyEventHandler — one instance per screen, stable across recompositions
-    val keyHandler = remember(onNavigateToSettings, detailsScrollState) {
+    val keyHandler = remember(onNavigateToSettings, onNavigateToVod, detailsScrollState) {
         KeyEventHandler(
             scope = scope,
             onIntent = viewModel::onIntent,
             onOpenSettings = onNavigateToSettings,
+            onOpenVod = onNavigateToVod,
             onScrollProgramDetails = { delta ->
                 scope.launch {
                     val target = (detailsScrollState.value + delta).coerceIn(0, detailsScrollState.maxValue)
@@ -342,6 +360,7 @@ fun ChannelListScreen(
         viewModel.navigationEvent.collect { event ->
             when (event) {
                 is ChannelListNavEvent.NavigateToPlayer -> navigateToPlayerSafe(event.channelId, event.catchupStartMs)
+                is ChannelListNavEvent.NavigateToVod -> onNavigateToVod()
             }
         }
     }
@@ -400,7 +419,7 @@ fun ChannelListScreen(
         // ── Main column layout: TopBar header + Content area
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // ── Top Bar with Group pill, Search & D-Pad focusable Settings ─
+            // ── Top Bar with Group pill, VOD Media Library, Search & D-Pad focusable Settings ─
             TopBar(
                 viewMode = uiState.viewMode,
                 selectedGroupName = uiState.selectedGroupName.ifBlank { "Все каналы" },
@@ -412,11 +431,13 @@ fun ChannelListScreen(
                 folderCount = uiState.folders.size,
                 isSettingsFocused = uiState.isSettingsFocused,
                 isSearchFocused = uiState.isSearchFocused,
+                isVodFocused = uiState.isVodFocused,
                 isGroupFocused = uiState.isGroupFocused,
                 hasUpdateAvailable = updateState.isUpdateAvailable,
                 remoteVersionName = updateState.remoteInfo?.versionName,
                 isCompact = isCompactScreen,
                 isPortrait = isPortrait,
+                onVodClick = onNavigateToVod,
                 onSearchClick = { viewModel.onIntent(ChannelListIntent.OpenSearch) },
                 onSettingsClick = onNavigateToSettings,
                 onBackToFoldersClick = { viewModel.onIntent(ChannelListIntent.ReturnToFolders) },
@@ -461,11 +482,13 @@ fun ChannelListScreen(
                                 .clip(CircleShape)
                                 .background(Color(0xFF10B981)),
                         )
+                        val daysLeft = updateState.daysUntilForceUpdate
+                        val daysSuffix = if (daysLeft != null && daysLeft in 1..30) " (осталось $daysLeft дн.)" else ""
                         Text(
                             text = if (isPortrait) {
-                                "Доступна версия v$remoteVer — обновить в Настройках"
+                                "Доступна версия v$remoteVer$daysSuffix — обновить в Настройках"
                             } else {
-                                "Доступно обновление программы v$remoteVer — перейдите в «⚙ Настройки», чтобы установить"
+                                "Доступно обновление программы v$remoteVer$daysSuffix — перейдите в «⚙ Настройки», чтобы установить"
                             },
                             color = Color(0xFFE8FFF6),
                             fontSize = if (isCompactScreen) 11.5.sp else 12.5.sp,
@@ -585,6 +608,7 @@ fun ChannelListScreen(
                     EmptyChannelsView(
                         isSettingsFocused = uiState.isSettingsFocused,
                         onOpenSettings = onNavigateToSettings,
+                        onOpenVod = onNavigateToVod,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth(),
@@ -902,6 +926,9 @@ fun ChannelListScreen(
                                 viewModel.onIntent(ChannelListIntent.SelectFolder(it))
                             }
                         }
+                    },
+                    RemoteHint("🎬", "Медиатека") {
+                        onNavigateToVod()
                     },
                     RemoteHint("🔍", "Поиск") {
                         viewModel.onIntent(ChannelListIntent.OpenSearch)
@@ -1505,11 +1532,13 @@ private fun TopBar(
     folderCount: Int,
     isSettingsFocused: Boolean,
     isSearchFocused: Boolean,
+    isVodFocused: Boolean = false,
     isGroupFocused: Boolean,
     hasUpdateAvailable: Boolean = false,
     remoteVersionName: String? = null,
     isCompact: Boolean = false,
     isPortrait: Boolean = false,
+    onVodClick: () -> Unit = {},
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onBackToFoldersClick: () -> Unit,
@@ -1668,11 +1697,47 @@ private fun TopBar(
             }
         }
 
-        // ── Actions (Search & Settings)
+        // ── Actions (VOD Media Library, Search & Settings)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 10.dp),
         ) {
+            // VOD Media Library button
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (isVodFocused) Color(0x4D00E5FF) else Color(0xCC16132E))
+                    .border(
+                        width = if (isVodFocused) 2.dp else 1.dp,
+                        color = if (isVodFocused) ChannelDesignTokens.NeonCyan else Color(0x558B5CF6),
+                        shape = RoundedCornerShape(10.dp),
+                    )
+                    .clickable(onClick = onVodClick)
+                    .padding(
+                        horizontal = if (isPortrait) 8.dp else if (isCompact) 10.dp else 14.dp,
+                        vertical = if (isCompact) 4.dp else 8.dp,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(if (isCompact) 4.dp else 6.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Movie,
+                    contentDescription = "Медиатека",
+                    tint = if (isVodFocused) Color.White else ChannelDesignTokens.NeonCyan,
+                    modifier = Modifier.size(if (isCompact) 15.dp else 18.dp),
+                )
+                if (!isPortrait) {
+                    Text(
+                        text = "Медиатека",
+                        color = if (isVodFocused) Color.White else TextPrimary,
+                        fontSize = if (isCompact) 11.5.sp else 13.sp,
+                        fontWeight = if (isVodFocused) FontWeight.Bold else FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+
             // Search button
             Row(
                 modifier = Modifier
@@ -1837,6 +1902,7 @@ private fun FolderGridCard(
     modifier: Modifier = Modifier,
 ) {
     val isMostUsed = folder.isMostUsed
+    val isVodCard = folder.iconType == FolderIconType.VOD
     val cornerRadius = 10.dp
     val shape = RoundedCornerShape(cornerRadius)
 
@@ -1844,6 +1910,9 @@ private fun FolderGridCard(
     val cardBrush = when {
         isFocused -> Brush.verticalGradient(
             colors = listOf(Color(0xFFF8FAFC), Color(0xFFE2E8F0)), // Bright luminous silver/slate
+        )
+        isVodCard -> Brush.verticalGradient(
+            colors = listOf(Color(0xFF1E1B4B), Color(0xFF0E3A53)),
         )
         isMostUsed -> Brush.verticalGradient(
             colors = listOf(Color(0xFF162542), Color(0xFF0D1627)),
@@ -1866,8 +1935,9 @@ private fun FolderGridCard(
             .scale(scaleAnim)
             .clip(shape)
             .border(
-                width = if (isFocused) 2.5.dp else if (isMostUsed) 1.2.dp else 0.8.dp,
+                width = if (isFocused) 2.5.dp else if (isVodCard || isMostUsed) 1.2.dp else 0.8.dp,
                 color = if (isFocused) Color(0xFF0284C7)
+                        else if (isVodCard) ChannelDesignTokens.NeonCyan.copy(alpha = 0.7f)
                         else if (isMostUsed) Color(0x6600E5FF)
                         else Color(0x2200E5FF),
                 shape = shape,
@@ -1907,19 +1977,20 @@ private fun FolderGridCard(
                             .clip(RoundedCornerShape(6.dp))
                             .background(
                                 if (isFocused) Color(0xFF0284C7)
-                                else if (isMostUsed) Color(0xFF1E2A44)
+                                else if (isVodCard || isMostUsed) Color(0xFF1E2A44)
                                 else Color(0xFF161C2C),
                             )
                             .border(
                                 width = 0.8.dp,
                                 color = if (isFocused) Color(0xFF0284C7)
-                                        else if (isMostUsed) Color(0x6600E5FF)
+                                        else if (isVodCard || isMostUsed) Color(0x6600E5FF)
                                         else Color(0x1F00E5FF),
                                 shape = RoundedCornerShape(6.dp),
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
                         val (icon, tint) = when (folder.iconType) {
+                            FolderIconType.VOD -> Icons.Filled.Movie to (if (isFocused) Color.White else ChannelDesignTokens.NeonCyan)
                             FolderIconType.ALL -> Icons.Filled.Tv to (if (isFocused) Color.White else ChannelDesignTokens.NeonCyan)
                             FolderIconType.FAVORITES -> Icons.Filled.Favorite to (if (isFocused) Color(0xFFFFD700) else ChannelDesignTokens.AccentGold)
                             FolderIconType.CATEGORY -> Icons.Filled.Folder to (if (isFocused) Color.White else Color(0xFF8193B2))
@@ -1936,7 +2007,23 @@ private fun FolderGridCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (isMostUsed) {
+                        if (isVodCard) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isFocused) Color(0xFFCBD5E1) else Color(0x3300E5FF))
+                                    .border(0.8.dp, if (isFocused) Color(0xFF0284C7) else Color(0x6600E5FF), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "КАТАЛОГ",
+                                    color = if (isFocused) Color(0xFF0F172A) else ChannelDesignTokens.NeonCyan,
+                                    fontSize = 7.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                )
+                            }
+                        } else if (isMostUsed) {
                             Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
@@ -1978,18 +2065,20 @@ private fun FolderGridCard(
                             }
                         }
 
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = if (isFocused) Color(0xFFCBD5E1) else Color(0x40131826),
-                            border = BorderStroke(0.8.dp, if (isFocused) Color(0xFF94A3B8) else Color(0x3300E5FF)),
-                        ) {
-                            Text(
-                                text = "${folder.channelCount}",
-                                color = if (isFocused) Color(0xFF0F172A) else TextSecondary,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                            )
+                        if (!isVodCard) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (isFocused) Color(0xFFCBD5E1) else Color(0x40131826),
+                                border = BorderStroke(0.8.dp, if (isFocused) Color(0xFF94A3B8) else Color(0x3300E5FF)),
+                            ) {
+                                Text(
+                                    text = "${folder.channelCount}",
+                                    color = if (isFocused) Color(0xFF0F172A) else TextSecondary,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -2004,17 +2093,17 @@ private fun FolderGridCard(
                         text = folder.title,
                         color = if (isFocused) Color(0xFF0F172A) else TextPrimary,
                         fontSize = 12.5.sp,
-                        fontWeight = if (isMostUsed || isFocused) FontWeight.ExtraBold else FontWeight.SemiBold,
+                        fontWeight = if (isVodCard || isMostUsed || isFocused) FontWeight.ExtraBold else FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "${folder.channelCount} кан.",
-                        color = if (isFocused) Color(0xFF0284C7) else TextSecondary,
+                        text = if (isVodCard) "Фильмы • VOD" else "${folder.channelCount} кан.",
+                        color = if (isFocused) Color(0xFF0284C7) else if (isVodCard) ChannelDesignTokens.NeonCyan else TextSecondary,
                         fontSize = 10.sp,
-                        fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Normal,
+                        fontWeight = if (isFocused || isVodCard) FontWeight.Bold else FontWeight.Normal,
                     )
                 }
             }
@@ -2228,6 +2317,7 @@ private fun StitchLivePreviewCard(
 private fun EmptyChannelsView(
     isSettingsFocused: Boolean,
     onOpenSettings: () -> Unit,
+    onOpenVod: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -2263,7 +2353,7 @@ private fun EmptyChannelsView(
             )
 
             Text(
-                text = "Для начала работы добавьте плейлист\n(M3U, Xtream или Stalker) в Настройках",
+                text = "Для начала работы добавьте плейлист\n(M3U, Xtream или Stalker) в Настройках или откройте Медиатеку",
                 color = TextSecondary,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
@@ -2272,32 +2362,62 @@ private fun EmptyChannelsView(
 
             Spacer(Modifier.height(4.dp))
 
-            Button(
-                onClick = onOpenSettings,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isSettingsFocused) AccentBlue else Color(0xFF1C1F2E),
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .border(
-                        width = if (isSettingsFocused) 2.dp else 1.dp,
-                        color = if (isSettingsFocused) Color.White else Color(0x444F8EF7),
-                        shape = RoundedCornerShape(12.dp),
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onOpenSettings,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isSettingsFocused) AccentBlue else Color(0xFF1C1F2E),
                     ),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "Открыть настройки",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .border(
+                            width = if (isSettingsFocused) 2.dp else 1.dp,
+                            color = if (isSettingsFocused) Color.White else Color(0x444F8EF7),
+                            shape = RoundedCornerShape(12.dp),
+                        ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Открыть настройки",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+
+                Button(
+                    onClick = onOpenVod,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1E1B4B),
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .border(
+                            width = 1.dp,
+                            color = ChannelDesignTokens.NeonCyan.copy(alpha = 0.6f),
+                            shape = RoundedCornerShape(12.dp),
+                        ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Movie,
+                        contentDescription = null,
+                        tint = ChannelDesignTokens.NeonCyan,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Медиатека",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
     }

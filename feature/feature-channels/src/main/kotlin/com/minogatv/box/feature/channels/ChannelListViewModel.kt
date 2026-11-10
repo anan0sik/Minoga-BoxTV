@@ -133,7 +133,7 @@ class ChannelListViewModel @Inject constructor(
             // Query channels from Room for the target folder immediately
             val rawChannels = when (lastFolder) {
                 "Все каналы" -> channelDao.getAllByProfile(profileId)
-                "Избранное" -> channelDao.getAllByProfile(profileId).filter { it.id in favIds }
+                "Избранное", "Избранные каналы" -> channelDao.getAllByProfile(profileId).filter { it.id in favIds }
                 else -> {
                     val byGroup = channelDao.getByGroup(profileId, lastFolder)
                     if (byGroup.isNotEmpty()) byGroup else channelDao.getAllByProfile(profileId)
@@ -319,6 +319,14 @@ class ChannelListViewModel @Inject constructor(
             ) { profileId, groups, totalCount, favorites ->
                 val list = mutableListOf<ChannelFolderItem>()
 
+                list.add(
+                    ChannelFolderItem(
+                        title = "🎬 Медиатека (Фильмы и Сериалы)",
+                        channelCount = 0,
+                        iconType = FolderIconType.VOD,
+                    ),
+                )
+
                 if (totalCount > 0) {
                     list.add(
                         ChannelFolderItem(
@@ -327,12 +335,9 @@ class ChannelListViewModel @Inject constructor(
                             iconType = FolderIconType.ALL,
                         ),
                     )
-                }
-
-                if (favorites.isNotEmpty()) {
                     list.add(
                         ChannelFolderItem(
-                            title = "Избранное",
+                            title = "Избранные каналы",
                             channelCount = favorites.size,
                             iconType = FolderIconType.FAVORITES,
                         ),
@@ -389,14 +394,14 @@ class ChannelListViewModel @Inject constructor(
                     } else {
                         val channelsFlow = when {
                             group == "Все каналы" -> channelDao.observeAllByProfile(profileId)
-                            group == "Избранное" -> channelDao.observeAllByProfile(profileId)
+                            group == "Избранное" || group == "Избранные каналы" -> channelDao.observeAllByProfile(profileId)
                             else -> channelDao.observeByGroup(profileId, group)
                         }
                         val favoritesFlow = favoriteDao.observeFavorites(profileId)
 
                         combine(channelsFlow, favoritesFlow) { channels, favorites ->
                             val favSet = favorites.map { it.channelId }.toSet()
-                            val filteredChannels = if (group == "Избранное") {
+                            val filteredChannels = if (group == "Избранное" || group == "Избранные каналы") {
                                 channels.filter { it.id in favSet }
                             } else {
                                 channels
@@ -461,6 +466,11 @@ class ChannelListViewModel @Inject constructor(
     }
 
     private fun selectFolder(folder: ChannelFolderItem) {
+        if (folder.iconType == FolderIconType.VOD) {
+            _navigationEvent.tryEmit(ChannelListNavEvent.NavigateToVod)
+            return
+        }
+
         if (folder.isLocked && !_uiState.value.unlockedFolderTitles.contains(folder.title)) {
             _uiState.update { it.copy(pendingPinFolder = folder) }
             return

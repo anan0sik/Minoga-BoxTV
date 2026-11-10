@@ -34,11 +34,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.PictureInPicture
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Timer
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -145,6 +149,10 @@ fun PlayerScreen(
     var seekDebounceJob by remember { mutableStateOf<Job?>(null) }
     var lastLoadedStreamUrl by remember { mutableStateOf<String?>(null) }
 
+    val isTv = remember(context) { AudioRouteRecovery.isTvDevice(context) }
+    var forcePhoneSpeaker by remember { mutableStateOf(false) }
+    var activeAudioRouteLabel by remember { mutableStateOf("Авто") }
+
     var playerPositionMs by remember { mutableLongStateOf(0L) }
     var playerDurationMs by remember { mutableLongStateOf(0L) }
 
@@ -167,24 +175,47 @@ fun PlayerScreen(
         }
     }
 
+    // ─── TrackSelector optimized for TV box displays and Bluetooth Car Audio (A2DP stereo) ──
+    val trackSelector = remember(context) {
+        DefaultTrackSelector(context).apply {
+            setParameters(
+                buildUponParameters()
+                    .setTunnelingEnabled(false) // Tunneling breaks on Amlogic TV boxes & Bluetooth A2DP
+                    .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, false)
+                    .setMaxAudioChannelCount(2) // Prefer stereo for Bluetooth A2DP car head units
+                    .setPreferredAudioMimeTypes(
+                        androidx.media3.common.MimeTypes.AUDIO_AAC,
+                        androidx.media3.common.MimeTypes.AUDIO_MPEG,
+                        androidx.media3.common.MimeTypes.AUDIO_MP4,
+                        androidx.media3.common.MimeTypes.AUDIO_AC3,
+                        androidx.media3.common.MimeTypes.AUDIO_E_AC3,
+                    )
+                    .setAllowAudioMixedMimeTypeAdaptiveness(true)
+                    .setAllowAudioMixedSampleRateAdaptiveness(true)
+                    .setAllowAudioMixedChannelCountAdaptiveness(true)
+                    .setExceedAudioConstraintsIfNecessary(true)
+                    .setExceedRendererCapabilitiesIfNecessary(true)
+                    .setAllowVideoMixedMimeTypeAdaptiveness(true)
+                    .setAllowVideoNonSeamlessAdaptiveness(true)
+                    .setAllowMultipleAdaptiveSelections(true),
+            )
+        }
+    }
+
     // ─── Initialize ExoPlayer for FHD & 4K IPTV Streams ──────────────────────
-    val exoPlayer = remember {
+    val exoPlayer = remember(trackSelector) {
         // 1. Hardware-accelerated decoders with fallback for FHD & 4K streams
         val renderersFactory = DefaultRenderersFactory(context).apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
             setEnableDecoderFallback(true) // Crucial for 4K / 1080p60: fallback if primary hardware codec fails
         }
 
-        // 2. TrackSelector optimized for TV box displays without crashing on tunneling
-        val trackSelector = DefaultTrackSelector(context).apply {
-            setParameters(
-                buildUponParameters()
-                    .setTunnelingEnabled(false) // Tunneling breaks on Amlogic TV boxes
-                    .setAllowVideoMixedMimeTypeAdaptiveness(true)
-                    .setAllowVideoNonSeamlessAdaptiveness(true)
-                    .setAllowMultipleAdaptiveSelections(true),
-            )
-        }
+        // 2. AudioAttributes with USAGE_MEDIA & handleAudioFocus=false so Android Auto / Car HFP
+        //    never mutes ExoPlayer internally when Bluetooth is turned off or focus is contested
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build()
 
         // 3. High-throughput buffer control for heavy FHD and 4K streams
         val loadControl = DefaultLoadControl.Builder()
@@ -211,19 +242,61 @@ fun PlayerScreen(
         val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
             .setLoadErrorHandlingPolicy(loadErrorPolicy)
 
+        AudioRouteRecovery.recoverSystemAudioState(context, forcePhoneSpeaker)
+
         ExoPlayer.Builder(context)
             .setRenderersFactory(renderersFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ false)
+            .setHandleAudioBecomingNoisy(false)
             .build()
             .apply {
+                volume = 1f
                 playWhenReady = true
+                activeAudioRouteLabel = AudioRouteRecovery.applyOptimalPreferredDevice(
+                    context = context,
+                    exoPlayer = this,
+                    forcePhoneSpeaker = forcePhoneSpeaker,
+                )
             }
     }
 
-    // ─── Setup Player Listener ────────────────────────────────────────────────
-    DisposableEffect(exoPlayer) {
+    // ─── Setup Player Listener & Live Audio Route Recovery ───────────────────
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(exoPlayer, trackSelector, lifecycleOwner) {
+        val unregisterAudioObserver = AudioRouteRecovery.registerLiveAudioRouteObserver(
+            context = context,
+            exoPlayer = exoPlayer,
+            trackSelector = trackSelector,
+            isForceSpeakerProvider = { forcePhoneSpeaker },
+            onRouteChanged = { label, showHud ->
+                activeAudioRouteLabel = label
+                if (showHud && !isTv) {
+                    seekDebounceJob?.cancel()
+                    seekFeedbackText = "🔊 Звук: $label"
+                    seekDebounceJob = coroutineScope.launch {
+                        delay(1800L)
+                        seekFeedbackText = null
+                    }
+                }
+            },
+        )
+
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                AudioRouteRecovery.recoverSystemAudioState(context, forcePhoneSpeaker)
+                activeAudioRouteLabel = AudioRouteRecovery.applyOptimalPreferredDevice(
+                    context = context,
+                    exoPlayer = exoPlayer,
+                    forcePhoneSpeaker = forcePhoneSpeaker,
+                )
+                exoPlayer.volume = 1f
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
@@ -231,6 +304,13 @@ fun PlayerScreen(
                     Player.STATE_READY -> {
                         viewModel.onPlayerStateChanged(isPlaying = true, isBuffering = false)
                         viewModel.retry() // Resets reconnect attempt counter on successful playback
+                        AudioRouteRecovery.recoverSystemAudioState(context, forcePhoneSpeaker)
+                        activeAudioRouteLabel = AudioRouteRecovery.applyOptimalPreferredDevice(
+                            context = context,
+                            exoPlayer = exoPlayer,
+                            forcePhoneSpeaker = forcePhoneSpeaker,
+                        )
+                        exoPlayer.volume = 1f
                     }
                     Player.STATE_ENDED -> viewModel.onPlayerStateChanged(isPlaying = false, isBuffering = false)
                     Player.STATE_IDLE -> Unit
@@ -284,6 +364,8 @@ fun PlayerScreen(
         exoPlayer.addListener(listener)
 
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
+            unregisterAudioObserver()
             exoPlayer.removeListener(listener)
             exoPlayer.release()
         }
@@ -742,6 +824,30 @@ fun PlayerScreen(
                             }
                         }
 
+                        val toggleAudioRouteAction = {
+                            forcePhoneSpeaker = !forcePhoneSpeaker
+                            AudioRouteRecovery.recoverAndRebuildAudioSink(
+                                context = context,
+                                exoPlayer = exoPlayer,
+                                trackSelector = trackSelector,
+                                forcePhoneSpeaker = forcePhoneSpeaker,
+                                rebuildSink = true,
+                            ) { label ->
+                                activeAudioRouteLabel = label
+                                seekDebounceJob?.cancel()
+                                seekFeedbackText = if (forcePhoneSpeaker) {
+                                    "🔊 Звук: Динамик телефона"
+                                } else {
+                                    "🔊 Звук: $label"
+                                }
+                                seekDebounceJob = coroutineScope.launch {
+                                    delay(1800L)
+                                    seekFeedbackText = null
+                                }
+                            }
+                            viewModel.showOsd()
+                        }
+
                         if (isPortrait) {
                             val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
                             Text(
@@ -751,17 +857,21 @@ fun PlayerScreen(
                                 fontWeight = FontWeight.SemiBold,
                             )
                         } else {
-                            // Landscape Right Controls: Rotate, Aspect Ratio, Sleep Timer, PiP & Clock
+                            // Landscape Right Controls: Rotate, Audio Route, Aspect Ratio, Sleep Timer, PiP & Clock
                             PlayerTopActionRow(
                                 uiState = uiState,
                                 isPortrait = false,
                                 isCompact = isCompact,
+                                isTv = isTv,
+                                activeAudioRouteLabel = activeAudioRouteLabel,
+                                forcePhoneSpeaker = forcePhoneSpeaker,
                                 prefs = prefs,
                                 context = context,
                                 onToggleOrientation = {
                                     val act = context.findPlayerActivity()
                                     act?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
                                 },
+                                onToggleAudioRoute = toggleAudioRouteAction,
                                 onCycleAspectRatio = { viewModel.cycleAspectRatio() },
                                 onCycleSleepTimer = { viewModel.cycleSleepTimer() },
                             )
@@ -774,11 +884,37 @@ fun PlayerScreen(
                             uiState = uiState,
                             isPortrait = true,
                             isCompact = true,
+                            isTv = isTv,
+                            activeAudioRouteLabel = activeAudioRouteLabel,
+                            forcePhoneSpeaker = forcePhoneSpeaker,
                             prefs = prefs,
                             context = context,
                             onToggleOrientation = {
                                 val act = context.findPlayerActivity()
                                 act?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                            },
+                            onToggleAudioRoute = {
+                                forcePhoneSpeaker = !forcePhoneSpeaker
+                                AudioRouteRecovery.recoverAndRebuildAudioSink(
+                                    context = context,
+                                    exoPlayer = exoPlayer,
+                                    trackSelector = trackSelector,
+                                    forcePhoneSpeaker = forcePhoneSpeaker,
+                                    rebuildSink = true,
+                                ) { label ->
+                                    activeAudioRouteLabel = label
+                                    seekDebounceJob?.cancel()
+                                    seekFeedbackText = if (forcePhoneSpeaker) {
+                                        "🔊 Звук: Динамик телефона"
+                                    } else {
+                                        "🔊 Звук: $label"
+                                    }
+                                    seekDebounceJob = coroutineScope.launch {
+                                        delay(1800L)
+                                        seekFeedbackText = null
+                                    }
+                                }
+                                viewModel.showOsd()
                             },
                             onCycleAspectRatio = { viewModel.cycleAspectRatio() },
                             onCycleSleepTimer = { viewModel.cycleSleepTimer() },
@@ -1027,9 +1163,13 @@ private fun PlayerTopActionRow(
     uiState: PlayerUiState,
     isPortrait: Boolean,
     isCompact: Boolean,
+    isTv: Boolean,
+    activeAudioRouteLabel: String,
+    forcePhoneSpeaker: Boolean,
     prefs: android.content.SharedPreferences,
     context: Context,
     onToggleOrientation: () -> Unit,
+    onToggleAudioRoute: () -> Unit,
     onCycleAspectRatio: () -> Unit,
     onCycleSleepTimer: () -> Unit,
 ) {
@@ -1037,6 +1177,39 @@ private fun PlayerTopActionRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (isCompact) 6.dp else 10.dp),
     ) {
+        // Audio Route / Speaker Recovery button on Smartphones & Tablets
+        if (!isTv) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (forcePhoneSpeaker) Color(0x4D00E5FF) else Color(0xCC131826))
+                    .border(
+                        1.dp,
+                        if (forcePhoneSpeaker) ChannelDesignTokens.NeonCyan else Color(0x3300E5FF),
+                        RoundedCornerShape(8.dp),
+                    )
+                    .clickable { onToggleAudioRoute() }
+                    .padding(horizontal = if (isCompact) 8.dp else 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = "Вывод звука",
+                    tint = ChannelDesignTokens.NeonCyan,
+                    modifier = Modifier.size(if (isCompact) 14.dp else 16.dp),
+                )
+                Text(
+                    text = if (forcePhoneSpeaker) "Динамик" else activeAudioRouteLabel,
+                    color = Color.White,
+                    fontSize = if (isCompact) 11.sp else 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
+
         // Rotate Screen button (Portrait <-> Landscape)
         Row(
             modifier = Modifier

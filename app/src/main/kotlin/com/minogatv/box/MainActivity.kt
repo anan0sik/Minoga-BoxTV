@@ -8,10 +8,13 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import com.minogatv.box.feature.ui.DisclaimerScreen
+import com.minogatv.box.feature.ui.ForceUpdateScreen
 import com.minogatv.box.feature.ui.LocalScreenKeyDispatcher
 import com.minogatv.box.feature.ui.ScreenKeyDispatcher
+import com.minogatv.box.feature.update.AppUpdateManager
 import com.minogatv.box.input.TouchRemoteController
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -33,6 +36,7 @@ import com.minogatv.box.core.data.backup.BackupManager
 import com.minogatv.box.feature.channels.ChannelListScreen
 import com.minogatv.box.feature.player.PlayerScreen
 import com.minogatv.box.feature.settings.SettingsScreen
+import com.minogatv.box.feature.vod.VodLibraryScreen
 import com.minogatv.box.ui.theme.MinogaTVBoxTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -61,9 +65,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.Theme_MinogaTVBox)
         super.onCreate(savedInstanceState)
+        volumeControlStream = android.media.AudioManager.STREAM_MUSIC
+        com.minogatv.box.feature.player.AudioRouteRecovery.recoverSystemAudioState(this)
         enableEdgeToEdge()
 
         val prefs = getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+        AppUpdateManager.ensureLocalVersionLoaded(this)
+        AppUpdateManager.checkForUpdates(this)
+
         if (prefs.getBoolean("accepted_terms", false)) {
             lifecycleScope.launch {
                 backupManager.checkAndAutoRestoreOnFirstLaunch()
@@ -83,8 +92,26 @@ class MainActivity : ComponentActivity() {
             var acceptedTerms by remember {
                 mutableStateOf(prefs.getBoolean("accepted_terms", false))
             }
+            val updateState by AppUpdateManager.state.collectAsState()
 
-            CompositionLocalProvider(LocalScreenKeyDispatcher provides screenKeyDispatcher) {
+            // On TVs whose system density makes the UI too large (e.g. FHD at 2.0x = 960dp wide),
+            // normalize density so the layout is at least ~1280dp wide; fontScale is pinned to 1.
+            val baseDensity = androidx.compose.ui.platform.LocalDensity.current
+            val res = androidx.compose.ui.platform.LocalContext.current.resources
+            val isTv = (res.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK) ==
+                android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+            val tvDensity = if (isTv) {
+                val widthPx = maxOf(res.displayMetrics.widthPixels, res.displayMetrics.heightPixels).toFloat()
+                androidx.compose.ui.unit.Density(
+                    density = minOf(baseDensity.density, widthPx / 1280f),
+                    fontScale = minOf(baseDensity.fontScale, 1f),
+                )
+            } else baseDensity
+
+            CompositionLocalProvider(
+                LocalScreenKeyDispatcher provides screenKeyDispatcher,
+                androidx.compose.ui.platform.LocalDensity provides tvDensity,
+            ) {
                 MinogaTVBoxTheme {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
@@ -100,6 +127,12 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onDecline = {
+                                    finishAffinity()
+                                },
+                            )
+                        } else if (updateState.isForceUpdateRequired) {
+                            ForceUpdateScreen(
+                                onExitApp = {
                                     finishAffinity()
                                 },
                             )
@@ -120,6 +153,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        com.minogatv.box.feature.player.AudioRouteRecovery.recoverSystemAudioState(this)
+        AppUpdateManager.onResumeCheckPendingInstall(this)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -168,6 +207,7 @@ class MainActivity : ComponentActivity() {
 
 private object Routes {
     const val CHANNEL_LIST = "channel_list"
+    const val VOD_LIBRARY  = "vod_library"
     const val SETTINGS     = "settings"
     const val PLAYER       = "player/{channelId}?catchupStartMs={catchupStartMs}"
 }
@@ -180,7 +220,7 @@ private fun MinogaNavHost(
     val navController = rememberNavController()
     val currentEntry by navController.currentBackStackEntryAsState()
     val route = currentEntry?.destination?.route.orEmpty()
-    onPlayerStateChanged(route.startsWith("player/"))
+    onPlayerStateChanged(route.startsWith("player/") || route == Routes.VOD_LIBRARY)
 
     NavHost(
         navController = navController,
@@ -201,6 +241,17 @@ private fun MinogaNavHost(
                 onNavigateToSettings = {
                     navController.navigate(Routes.SETTINGS)
                 },
+                onNavigateToVod = {
+                    navController.navigate(Routes.VOD_LIBRARY)
+                },
+            )
+        }
+
+        // ── Медиатека (каталог фильмов и сериалов) ────────────────────────
+        composable(Routes.VOD_LIBRARY) {
+            VodLibraryScreen(
+                onBackClick = { navController.popBackStack() },
+                onOpenSettingsClick = { navController.navigate(Routes.SETTINGS) },
             )
         }
 
@@ -208,6 +259,7 @@ private fun MinogaNavHost(
         composable(Routes.SETTINGS) {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
+                onOpenVodLibrary = { navController.navigate(Routes.VOD_LIBRARY) },
             )
         }
 

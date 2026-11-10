@@ -9,6 +9,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.gestures.animateScrollBy
+import kotlinx.coroutines.launch
 import androidx.compose.ui.focus.onFocusChanged
 import com.minogatv.box.core.model.enums.CatchupType
 import androidx.compose.foundation.layout.Arrangement
@@ -262,6 +267,7 @@ private fun FocusableIconButton(
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onOpenVodLibrary: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -317,6 +323,12 @@ fun SettingsScreen(
     var editingPlaylist    by remember { mutableStateOf<Playlist?>(null) }
     var deleteTarget       by remember { mutableStateOf<Playlist?>(null) }
 
+    var vodPortalUrl by remember { mutableStateOf(prefs.getString("vod_portal_url", "") ?: "") }
+    var vodPortalLogin by remember { mutableStateOf(prefs.getString("vod_portal_login", "") ?: "") }
+    var vodPortalPassword by remember { mutableStateOf(prefs.getString("vod_portal_password", "") ?: "") }
+    var vodPortalKey by remember { mutableStateOf(prefs.getString("vod_portal_key", "") ?: "") }
+    var showVodConfigDialog by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -343,11 +355,39 @@ fun SettingsScreen(
             )
         }
 
+        // D-pad scrolling: LazyColumn only composes visible items, so focus search can't find
+        // the next focusable item off-screen and the key press is lost. Scroll manually and retry.
+        val settingsListState = androidx.compose.foundation.lazy.rememberLazyListState()
+        val settingsScope = androidx.compose.runtime.rememberCoroutineScope()
+        val settingsFocusManager = androidx.compose.ui.platform.LocalFocusManager.current
+        val scrollStepPx = with(androidx.compose.ui.platform.LocalDensity.current) { 160.dp.toPx() }
+
         LazyColumn(
+            state = settingsListState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp)
+                .onPreviewKeyEvent { event ->
+                    val down = event.key == androidx.compose.ui.input.key.Key.DirectionDown
+                    val up = event.key == androidx.compose.ui.input.key.Key.DirectionUp
+                    if ((!down && !up) || event.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) {
+                        false
+                    } else {
+                        val dir = if (down) androidx.compose.ui.focus.FocusDirection.Down
+                        else androidx.compose.ui.focus.FocusDirection.Up
+                        if (settingsFocusManager.moveFocus(dir)) {
+                            true
+                        } else {
+                            settingsScope.launch {
+                                settingsListState.animateScrollBy(if (down) scrollStepPx * 3 else -scrollStepPx * 3)
+                                settingsFocusManager.moveFocus(dir)
+                            }
+                            val canScroll = if (down) settingsListState.canScrollForward else settingsListState.canScrollBackward
+                            canScroll
+                        }
+                    }
+                },
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
 
@@ -380,6 +420,18 @@ fun SettingsScreen(
             }
 
             item {
+                var showScaleDropdown by remember { mutableStateOf(false) }
+                val scaleOptions = listOf(
+                    40 to "40% — Максимально компактный",
+                    60 to "60% — Мелкий (для смартфонов)",
+                    80 to "80% — Уменьшенный",
+                    100 to "100% — Стандартный (Full HD)",
+                    150 to "150% — Увеличенный (1.5x)",
+                    200 to "200% — Крупный (2x)",
+                    250 to "250% — Очень крупный (2.5x)",
+                    300 to "300% — Огромный (4K ТВ)",
+                )
+
                 SettingCardContainer { isFocused ->
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
@@ -395,48 +447,53 @@ fun SettingsScreen(
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Text(
-                                    "Масштаб высоты строк и шрифта каналов и телепрограммы",
+                                    "Выберите комфортный масштаб интерфейса из выпадающего списка",
                                     color = TextSec,
                                     fontSize = 12.sp,
                                 )
                             }
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(if (isFocused) Color(0xFF234273) else Surface2)
-                                    .padding(horizontal = 8.dp, vertical = 2.dp),
-                            ) {
-                                Text(
-                                    text = "$uiScalePercent%",
-                                    color = if (isFocused) Color.White else Accent,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                            }
+                            FocusableSettingButton(
+                                text = "Размер: $uiScalePercent% ▾",
+                                isSelected = true,
+                                onClick = { showScaleDropdown = !showScaleDropdown },
+                            )
                         }
 
-                        val scaleOptions = listOf(
-                            100 to "100%",
-                            80 to "80%",
-                            60 to "60%",
-                            40 to "40%",
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        AnimatedVisibility(
+                            visible = showScaleDropdown,
+                            enter = expandVertically(),
+                            exit = shrinkVertically(),
                         ) {
-                            scaleOptions.forEach { (scale, label) ->
-                                val isSelected = uiScalePercent == scale
-                                FocusableSettingButton(
-                                    text = label,
-                                    isSelected = isSelected,
-                                    onClick = {
-                                        uiScalePercent = scale
-                                        prefs.edit().putInt("ui_scale_percent", scale).apply()
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF0A0F1A))
+                                    .border(1.dp, Color(0x6600E5FF), RoundedCornerShape(10.dp))
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                scaleOptions.chunked(2).forEach { pair ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        pair.forEach { (scale, label) ->
+                                            val isSelected = uiScalePercent == scale
+                                            FocusableSettingButton(
+                                                text = if (isSelected) "✓ $label" else label,
+                                                isSelected = isSelected,
+                                                onClick = {
+                                                    uiScalePercent = scale
+                                                    prefs.edit().putInt("ui_scale_percent", scale).apply()
+                                                    showScaleDropdown = false
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -540,6 +597,97 @@ fun SettingsScreen(
                 item {
                     Box(Modifier.fillMaxWidth().padding(24.dp), Alignment.Center) {
                         CircularProgressIndicator(color = Accent)
+                    }
+                }
+            }
+
+            // ── Section header: Медиатека (Портал фильмов и сериалов) ─────
+            item {
+                Text(
+                    text = "🎬 МЕДИАТЕКА (ПОРТАЛ ФИЛЬМОВ И СЕРИАЛОВ)",
+                    color = Color(0xFF00E5FF),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.5.sp,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                )
+            }
+
+            item {
+                val hasVodPortal = vodPortalUrl.isNotBlank() || vodPortalKey.isNotBlank()
+                val statusLabel = if (hasVodPortal) {
+                    buildString {
+                        append("✅ Подключен: ")
+                        append(if (vodPortalUrl.isNotBlank()) vodPortalUrl else "Портал по ключу")
+                        if (vodPortalLogin.isNotBlank()) append(" • Логин: $vodPortalLogin")
+                        if (vodPortalKey.isNotBlank()) append(" • Ключ: ${vodPortalKey.take(4)}***")
+                    }
+                } else {
+                    "Портал не настроен • Укажите URL, Логин, Пароль или Ключ (либо отправьте через minogatvbox.duckdns.org)"
+                }
+
+                SettingCardContainer(
+                    modifier = Modifier.border(
+                        width = 1.dp,
+                        color = Color(0x5500E5FF),
+                        shape = RoundedCornerShape(12.dp),
+                    ),
+                ) { isFocused ->
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Column {
+                            Text(
+                                text = "Параметры доступа к каталогу фильмов (VOD / Кинозал)",
+                                color = if (isFocused) Color.White else TextPrim,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = statusLabel,
+                                color = if (hasVodPortal) Color(0xFF4ADE80) else TextSec,
+                                fontSize = 12.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            FocusableSettingButton(
+                                text = "⚙ Настроить портал",
+                                isSelected = true,
+                                onClick = { showVodConfigDialog = true },
+                                modifier = Modifier.weight(1f),
+                            )
+                            FocusableSettingButton(
+                                text = "🎬 Открыть медиатеку",
+                                isSelected = false,
+                                onClick = onOpenVodLibrary,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (hasVodPortal) {
+                                FocusableSettingButton(
+                                    text = "🗑 Очистить",
+                                    isSelected = false,
+                                    onClick = {
+                                        vodPortalUrl = ""
+                                        vodPortalLogin = ""
+                                        vodPortalPassword = ""
+                                        vodPortalKey = ""
+                                        prefs.edit()
+                                            .remove("vod_portal_url")
+                                            .remove("vod_portal_login")
+                                            .remove("vod_portal_password")
+                                            .remove("vod_portal_key")
+                                            .apply()
+                                        Toast.makeText(context, "Настройки портала Медиатеки очищены", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.weight(0.75f),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1212,10 +1360,41 @@ fun SettingsScreen(
                     pageUrl = webConfigUrl,
                     onConfigApplied = { cfg ->
                         cfg.epgUrl?.let { customEpgUrl = it }
+                        if (!cfg.vodUrl.isNullOrBlank() || !cfg.vodKey.isNullOrBlank()) {
+                            vodPortalUrl = cfg.vodUrl.orEmpty()
+                            vodPortalLogin = cfg.vodLogin.orEmpty()
+                            vodPortalPassword = cfg.vodPassword.orEmpty()
+                            vodPortalKey = cfg.vodKey.orEmpty()
+                        }
                     },
                 )
             },
             onDismiss = { viewModel.stopWebPairingSession() },
+        )
+    }
+
+    // ── VOD Portal Config Dialog (4 Fields: URL, Login, Password, Key) ───────
+    if (showVodConfigDialog) {
+        VodPortalConfigDialog(
+            initialUrl = vodPortalUrl,
+            initialLogin = vodPortalLogin,
+            initialPassword = vodPortalPassword,
+            initialKey = vodPortalKey,
+            onSave = { url, login, pass, key ->
+                vodPortalUrl = url.trim()
+                vodPortalLogin = login.trim()
+                vodPortalPassword = pass.trim()
+                vodPortalKey = key.trim()
+                prefs.edit()
+                    .putString("vod_portal_url", vodPortalUrl)
+                    .putString("vod_portal_login", vodPortalLogin)
+                    .putString("vod_portal_password", vodPortalPassword)
+                    .putString("vod_portal_key", vodPortalKey)
+                    .apply()
+                showVodConfigDialog = false
+                Toast.makeText(context, "Параметры портала Медиатеки сохранены", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { showVodConfigDialog = false },
         )
     }
 }
@@ -2208,3 +2387,157 @@ private fun minogaTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedContainerColor   = Surface2,
     unfocusedContainerColor = Surface2,
 )
+
+private val PORTAL_STRING_REGEX = Regex("^(?:https?://)?portal::(?:\\[([^\\]]*)\\])?\\s*(https?://.+)$", RegexOption.IGNORE_CASE)
+
+private fun normalizePortalUrlAndKey(rawUrl: String, rawKey: String): Pair<String, String> {
+    var u = rawUrl.trim()
+    var k = rawKey.trim()
+    val mUrl = PORTAL_STRING_REGEX.find(u)
+    if (mUrl != null) {
+        val bracket = mUrl.groupValues.getOrNull(1).orEmpty()
+        u = mUrl.groupValues.getOrNull(2).orEmpty().trim()
+        bracket.split(";").forEach { part ->
+            val p = part.trim()
+            if (p.startsWith("key:", ignoreCase = true)) {
+                val ek = p.substring(4).trim()
+                if (ek.isNotEmpty()) k = ek
+            }
+        }
+    } else {
+        val mKey = PORTAL_STRING_REGEX.find(k)
+        if (mKey != null) {
+            val bracket = mKey.groupValues.getOrNull(1).orEmpty()
+            val eu = mKey.groupValues.getOrNull(2).orEmpty().trim()
+            if (eu.isNotEmpty()) u = eu
+            bracket.split(";").forEach { part ->
+                val p = part.trim()
+                if (p.startsWith("key:", ignoreCase = true)) {
+                    val ek = p.substring(4).trim()
+                    if (ek.isNotEmpty()) k = ek
+                }
+            }
+        }
+    }
+    return u to k
+}
+
+@Composable
+fun VodPortalConfigDialog(
+    initialUrl: String,
+    initialLogin: String,
+    initialPassword: String,
+    initialKey: String,
+    onSave: (url: String, login: String, password: String, key: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var url by remember { mutableStateOf(initialUrl) }
+    var login by remember { mutableStateOf(initialLogin) }
+    var password by remember { mutableStateOf(initialPassword) }
+    var key by remember { mutableStateOf(initialKey) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface1,
+        titleContentColor = TextPrim,
+        textContentColor = TextSec,
+        title = {
+            Text(
+                text = "🎬 Подключение портала Медиатеки",
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = Color(0xFF00E5FF),
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Введите параметры доступа от вашего провайдера (или отправьте их с телефона на minogatvbox.duckdns.org по 4-значному коду):",
+                    color = TextSec,
+                    fontSize = 12.sp,
+                )
+                MinogaTextField(
+                    value = url,
+                    onValueChange = {
+                        if (it.contains("portal::", ignoreCase = true)) {
+                            val (nu, nk) = normalizePortalUrlAndKey(it, key)
+                            url = nu
+                            key = nk
+                        } else {
+                            url = it
+                        }
+                        errorMsg = null
+                    },
+                    label = "1. Адрес портала (URL)",
+                    placeholder = "https://example-portal.tv или portal::[key:...]http://...",
+                    keyboardType = KeyboardType.Uri,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    MinogaTextField(
+                        value = login,
+                        onValueChange = { login = it },
+                        label = "2. Логин",
+                        placeholder = "Логин абонента",
+                        modifier = Modifier.weight(1f),
+                    )
+                    MinogaTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = "3. Пароль",
+                        placeholder = "Пароль",
+                        keyboardType = KeyboardType.Password,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                MinogaTextField(
+                    value = key,
+                    onValueChange = {
+                        if (it.contains("portal::", ignoreCase = true)) {
+                            val (nu, nk) = normalizePortalUrlAndKey(url, it)
+                            url = nu
+                            key = nk
+                        } else {
+                            key = it
+                        }
+                        errorMsg = null
+                    },
+                    label = "4. Ключ доступа (Key / Токен портала)",
+                    placeholder = "Ключ доступа к медиатеке",
+                )
+                if (errorMsg != null) {
+                    Text(
+                        text = errorMsg!!,
+                        color = DangerRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val (cleanUrl, cleanKey) = normalizePortalUrlAndKey(url, key)
+                    if (cleanUrl.isBlank() && cleanKey.isBlank()) {
+                        errorMsg = "Укажите адрес портала (URL) или ключ доступа (Key)"
+                    } else {
+                        onSave(cleanUrl, login.trim(), password.trim(), cleanKey)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+            ) {
+                Text("✓ Сохранить и подключить", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена", color = TextSec)
+            }
+        },
+    )
+}

@@ -22,7 +22,10 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.TimeZone
+import kotlin.math.ceil
 
 data class RemoteVersionInfo(
     val versionName: String,
@@ -31,11 +34,13 @@ data class RemoteVersionInfo(
     val sha256: String,
     val updated: String,
     val downloadUrl: String,
+    val minRequiredVersionCode: Int = 0,
+    val serverTimeMs: Long = 0L,
 )
 
 data class AppUpdateState(
-    val localVersionName: String = "1.0.7",
-    val localVersionCode: Int = 8,
+    val localVersionName: String = "1.1.0",
+    val localVersionCode: Int = 11,
     val remoteInfo: RemoteVersionInfo? = null,
     val isChecking: Boolean = false,
     val isDownloading: Boolean = false,
@@ -46,20 +51,30 @@ data class AppUpdateState(
     val isBannerDismissed: Boolean = false,
     val lastCheckedAtMs: Long = 0L,
     val errorMessage: String? = null,
+    val isForceUpdateRequired: Boolean = false,
+    val daysUntilForceUpdate: Int? = null,
 ) {
     val isUpdateAvailable: Boolean
-        get() = remoteInfo != null && remoteInfo.versionCode > localVersionCode
+        get() = (remoteInfo != null && remoteInfo.versionCode > localVersionCode) || isForceUpdateRequired
 }
 
 /**
  * Singleton OTA update manager that checks `https://minogatvbox.duckdns.org/download/version.json`,
  * downloads the latest APK with SHA-256 verification, and launches the Android system package installer.
+ *
+ * Enforces mandatory updates when an update has been ignored for >= 30 days or when
+ * `localVersionCode < remoteInfo.minRequiredVersionCode`.
  */
 object AppUpdateManager {
 
     private const val BASE_URL = "https://minogatvbox.duckdns.org"
     private const val VERSION_JSON_URL = "$BASE_URL/download/version.json"
     private const val CHECK_COOLDOWN_MS = 5 * 60 * 1000L // 5 minutes for automatic background checks
+    private const val MANDATORY_UPDATE_GRACE_PERIOD_MS = 30L * 24L * 60L * 60L * 1000L // 30 days
+    private const val PREFS_NAME = "minoga_tv_prefs"
+    private const val KEY_FIRST_SEEN_MS = "update_first_seen_at_ms"
+    private const val KEY_FIRST_SEEN_FOR_LOCAL_CODE = "update_first_seen_for_local_code"
+    private const val KEY_FORCE_LOCKED_FOR_LOCAL_CODE = "force_update_locked_for_local_code"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -79,13 +94,99 @@ object AppUpdateManager {
                 pkg.versionCode
             }
             val name = pkg.versionName ?: "1.0"
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val trackedLocalCode = prefs.getInt(KEY_FIRST_SEEN_FOR_LOCAL_CODE, -1)
+            if (trackedLocalCode != -1 && trackedLocalCode != code) {
+                // App was updated to a new versionCode — clear previous mandatory update timers/locks
+                prefs.edit()
+                    .remove(KEY_FIRST_SEEN_MS)
+                    .remove(KEY_FIRST_SEEN_FOR_LOCAL_CODE)
+                    .remove(KEY_FORCE_LOCKED_FOR_LOCAL_CODE)
+                    .apply()
+            }
+            val isLockedOffline = prefs.getInt(KEY_FORCE_LOCKED_FOR_LOCAL_CODE, -1) == code
             _state.update {
                 it.copy(
                     localVersionName = name,
                     localVersionCode = code,
+                    isForceUpdateRequired = it.isForceUpdateRequired || isLockedOffline,
                 )
             }
         } catch (_: Exception) {
+        }
+    }
+
+    private fun parseIsoTimestampMs(iso: String): Long {
+        if (iso.isBlank()) return 0L
+        return try {
+            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            fmt.parse(iso)?.time ?: 0L
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    private fun evaluateMandatoryUpdatePolicy(
+        context: Context,
+        localVersionCode: Int,
+        remote: RemoteVersionInfo,
+    ): Pair<Boolean, Int?> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (remote.versionCode <= localVersionCode) {
+            prefs.edit()
+                .remove(KEY_FIRST_SEEN_MS)
+                .remove(KEY_FIRST_SEEN_FOR_LOCAL_CODE)
+                .remove(KEY_FORCE_LOCKED_FOR_LOCAL_CODE)
+                .apply()
+            return false to null
+        }
+
+        // 1. Server hard cutoff (minRequiredVersionCode)
+        if (remote.minRequiredVersionCode > 0 && localVersionCode < remote.minRequiredVersionCode) {
+            prefs.edit().putInt(KEY_FORCE_LOCKED_FOR_LOCAL_CODE, localVersionCode).apply()
+            return true to 0
+        }
+
+        // 2. Clock-tamper-resistant current timestamp (max of device clock, HTTP Date header, and release timestamp)
+        val remoteReleaseMs = parseIsoTimestampMs(remote.updated)
+        val effectiveNowMs = maxOf(System.currentTimeMillis(), remote.serverTimeMs, remoteReleaseMs)
+
+        val savedFirstSeen = prefs.getLong(KEY_FIRST_SEEN_MS, 0L)
+        val savedForCode = prefs.getInt(KEY_FIRST_SEEN_FOR_LOCAL_CODE, -1)
+
+        // Baseline when update was first available:
+        // - If already recorded for this localVersionCode, keep the earliest of savedFirstSeen and remoteReleaseMs.
+        // - If not recorded yet (or user cleared app data), start from remoteReleaseMs (when the update was published on server).
+        val serverBaselineMs = if (remoteReleaseMs in 1_700_000_000_001L..effectiveNowMs) {
+            remoteReleaseMs
+        } else {
+            effectiveNowMs
+        }
+
+        val firstSeenMs = if (savedFirstSeen > 0L && savedForCode == localVersionCode) {
+            minOf(savedFirstSeen, serverBaselineMs)
+        } else {
+            serverBaselineMs
+        }
+
+        if (firstSeenMs != savedFirstSeen || savedForCode != localVersionCode) {
+            prefs.edit()
+                .putLong(KEY_FIRST_SEEN_MS, firstSeenMs)
+                .putInt(KEY_FIRST_SEEN_FOR_LOCAL_CODE, localVersionCode)
+                .apply()
+        }
+
+        val elapsedMs = (effectiveNowMs - firstSeenMs).coerceAtLeast(0L)
+        return if (elapsedMs >= MANDATORY_UPDATE_GRACE_PERIOD_MS) {
+            prefs.edit().putInt(KEY_FORCE_LOCKED_FOR_LOCAL_CODE, localVersionCode).apply()
+            true to 0
+        } else {
+            val remainingMs = MANDATORY_UPDATE_GRACE_PERIOD_MS - elapsedMs
+            val daysLeft = ceil(remainingMs.toDouble() / (24.0 * 60.0 * 60.0 * 1000.0)).toInt().coerceIn(1, 30)
+            val alreadyLocked = prefs.getInt(KEY_FORCE_LOCKED_FOR_LOCAL_CODE, -1) == localVersionCode
+            alreadyLocked to (if (alreadyLocked) 0 else daysLeft)
         }
     }
 
@@ -136,10 +237,12 @@ object AppUpdateManager {
                         if (code !in 200..299) {
                             throw IllegalStateException("HTTP $code при проверке обновлений")
                         }
+                        val serverDateMs = conn.date.takeIf { it > 0L } ?: System.currentTimeMillis()
                         val body = conn.inputStream.bufferedReader().use { it.readText() }
                         val json = JSONObject(body)
                         val versionName = json.optString("versionName", "").trim()
                         val versionCode = json.optInt("versionCode", 0)
+                        val minRequiredVersionCode = json.optInt("minRequiredVersionCode", 0)
                         val sizeBytes = json.optLong("sizeBytes", 0L)
                         val sha256 = json.optString("sha256", "").trim().lowercase(Locale.US)
                         val updated = json.optString("updated", "").trim()
@@ -156,6 +259,8 @@ object AppUpdateManager {
                             sha256 = sha256,
                             updated = updated,
                             downloadUrl = fullUrl,
+                            minRequiredVersionCode = minRequiredVersionCode,
+                            serverTimeMs = serverDateMs,
                         )
                     } finally {
                         conn.disconnect()
@@ -164,14 +269,17 @@ object AppUpdateManager {
             }
 
             result.onSuccess { remote ->
+                val localCode = _state.value.localVersionCode
+                val (forceRequired, daysLeft) = evaluateMandatoryUpdatePolicy(appContext, localCode, remote)
                 _state.update { prev ->
-                    val isNewerVersion = remote.versionCode > prev.localVersionCode
                     val prevRemoteCode = prev.remoteInfo?.versionCode ?: -1
                     prev.copy(
                         remoteInfo = remote,
                         isChecking = false,
                         lastCheckedAtMs = System.currentTimeMillis(),
                         errorMessage = null,
+                        isForceUpdateRequired = forceRequired,
+                        daysUntilForceUpdate = daysLeft,
                         // Reset banner dismissal if an even newer version appeared
                         isBannerDismissed = if (remote.versionCode != prevRemoteCode) false else prev.isBannerDismissed,
                     )

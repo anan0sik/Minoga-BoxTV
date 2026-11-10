@@ -177,11 +177,17 @@ class SettingsViewModel @Inject constructor(
                             backupManager.autoBackup()
                             _webPairingState.value = WebPairingDialogState(isVisible = false)
                             val epgDisplay = cfg.epgUrl ?: Playlist.DEFAULT_EPG_URL
+                            val parts = mutableListOf<String>()
+                            if (cfg.playlistUrl.isNotBlank()) {
+                                parts.add("• Название: ${cfg.name}")
+                                parts.add("• Плейлист: ${cfg.playlistUrl}")
+                                parts.add("• Телепрограмма (EPG): $epgDisplay")
+                            }
+                            if (!cfg.vodUrl.isNullOrBlank() || !cfg.vodKey.isNullOrBlank()) {
+                                parts.add("• Медиатека (VOD): ${cfg.vodUrl ?: "Портал подключен по ключу"}")
+                            }
                             _backupMessage.value =
-                                "Плейлист и EPG успешно установлены по коду $generatedCode:\n" +
-                                "• Название: ${cfg.name}\n" +
-                                "• Плейлист: ${cfg.playlistUrl}\n" +
-                                "• Телепрограмма (EPG): $epgDisplay"
+                                "Данные успешно установлены по коду $generatedCode:\n" + parts.joinToString("\n")
                             onConfigApplied(cfg)
                         }.onFailure { err ->
                             val msg = err.localizedMessage ?: err.message ?: "Ошибка загрузки плейлиста"

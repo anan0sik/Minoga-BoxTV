@@ -199,12 +199,21 @@ object WebConfigParser {
             listOf("epgUrl", "epg_url", "epg", "xmltvUrl", "xmltv_url", "xmltv"),
         )?.trim().orEmpty()
 
-        if (playlistRaw.isEmpty()) return null
+        val vodUrlRaw = extractJsonField(json, listOf("vodUrl", "vod_url", "portalUrl"))?.trim().orEmpty()
+        val vodLoginRaw = extractJsonField(json, listOf("vodLogin", "vod_login", "portalLogin"))?.trim().orEmpty()
+        val vodPasswordRaw = extractJsonField(json, listOf("vodPassword", "vod_password", "portalPassword"))?.trim().orEmpty()
+        val vodKeyRaw = extractJsonField(json, listOf("vodKey", "vod_key", "portalKey"))?.trim().orEmpty()
+
+        if (playlistRaw.isEmpty() && vodUrlRaw.isEmpty() && vodKeyRaw.isEmpty()) return null
 
         return WebConfig(
             name = name,
-            playlistUrl = resolveUrl(sourcePageUrl, playlistRaw),
+            playlistUrl = playlistRaw.takeIf { it.isNotEmpty() }?.let { resolveUrl(sourcePageUrl, it) }.orEmpty(),
             epgUrl = epgRaw.takeIf { it.isNotEmpty() }?.let { resolveUrl(sourcePageUrl, it) },
+            vodUrl = vodUrlRaw.takeIf { it.isNotEmpty() },
+            vodLogin = vodLoginRaw.takeIf { it.isNotEmpty() },
+            vodPassword = vodPasswordRaw.takeIf { it.isNotEmpty() },
+            vodKey = vodKeyRaw.takeIf { it.isNotEmpty() },
             sourcePageUrl = sourcePageUrl,
         )
     }

@@ -445,7 +445,8 @@ class PlaylistRepositoryImpl @Inject constructor(
 
     override suspend fun applySubmittedWebConfig(webConfig: WebConfig, profileId: Long): Result<WebConfig> = withContext(Dispatchers.IO) {
         try {
-            val cleanPlaylistUrl = Playlist.normalizeUrl(webConfig.playlistUrl)
+            val rawPlaylistUrl = webConfig.playlistUrl.trim()
+            val cleanPlaylistUrl = if (rawPlaylistUrl.isNotBlank()) Playlist.normalizeUrl(rawPlaylistUrl) else ""
             val cleanEpgUrl = webConfig.epgUrl?.trim()?.takeIf { it.isNotBlank() }?.let { Playlist.normalizeUrl(it) }
 
             val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
@@ -454,7 +455,17 @@ class PlaylistRepositoryImpl @Inject constructor(
             if (cleanEpgUrl != null) {
                 editor.putString("custom_epg_url", cleanEpgUrl)
             }
+            if (!webConfig.vodUrl.isNullOrBlank() || !webConfig.vodKey.isNullOrBlank()) {
+                editor.putString("vod_portal_url", webConfig.vodUrl?.trim().orEmpty())
+                editor.putString("vod_portal_login", webConfig.vodLogin?.trim().orEmpty())
+                editor.putString("vod_portal_password", webConfig.vodPassword?.trim().orEmpty())
+                editor.putString("vod_portal_key", webConfig.vodKey?.trim().orEmpty())
+            }
             editor.apply()
+
+            if (cleanPlaylistUrl.isBlank()) {
+                return@withContext Result.success(webConfig)
+            }
 
             val existingPlaylists = playlistDao.getAll()
             val matchingExisting = existingPlaylists.firstOrNull {

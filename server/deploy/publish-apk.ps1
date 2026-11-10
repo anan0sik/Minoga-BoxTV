@@ -1,9 +1,10 @@
 # Publish the Android APK to Server1 so it can be downloaded from https://minogatvbox.duckdns.org
-# Usage: .\server\deploy\publish-apk.ps1 -Target ubuntu@130.61.183.21 [-Key C:\path\to\key] [-Apk path\to.apk]
+# Usage: .\server\deploy\publish-apk.ps1 -Target ubuntu@130.61.183.21 [-Key C:\path\to\key] [-Apk path\to.apk] [-MinRequiredVersionCode 0]
 param(
     [Parameter(Mandatory = $true)][string]$Target,
     [string]$Key,
-    [string]$Apk
+    [string]$Apk,
+    [int]$MinRequiredVersionCode = 0
 )
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path "$PSScriptRoot\..\.."
@@ -22,12 +23,13 @@ Remove-Item $out -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $out | Out-Null
 Copy-Item $Apk (Join-Path $out 'MinogaTVBox.apk')
 $info = [ordered]@{
-    versionName = $versionName
-    versionCode = $versionCode
-    sizeBytes   = $file.Length
-    sha256      = $sha
-    updated     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    url         = '/download/MinogaTVBox.apk'
+    versionName            = $versionName
+    versionCode            = $versionCode
+    minRequiredVersionCode = $MinRequiredVersionCode
+    sizeBytes              = $file.Length
+    sha256                 = $sha
+    updated                = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    url                    = '/download/MinogaTVBox.apk'
 }
 [IO.File]::WriteAllText((Join-Path $out 'version.json'), ($info | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
 

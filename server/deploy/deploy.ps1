@@ -14,7 +14,10 @@ New-Item -ItemType Directory $out | Out-Null
 & $javac --release 17 -encoding UTF-8 -d $out (Join-Path $root 'server\IptvMockServer.java')
 Move-Item (Join-Path $out 'server\*.class') $out
 Remove-Item (Join-Path $out 'server') -Recurse -Force
-Copy-Item (Join-Path $root 'web\index.html'), (Join-Path $root 'web\config.json') $out
+Copy-Item (Join-Path $root 'web\index.html'), (Join-Path $root 'web\tv.html'), (Join-Path $root 'web\config.json') $out
+if (Test-Path (Join-Path $root 'screenshots')) {
+    Copy-Item (Join-Path $root 'screenshots\*.png') $out -ErrorAction SilentlyContinue
+}
 $deployFiles = 'minogatvbox.service', 'minogatvbox.nginx.conf', 'minogatvbox.nginx.ssl.conf', 'minogatvbox-common.conf', 'remote-install.sh'
 foreach ($f in $deployFiles) {
     # Copy with LF line endings for Linux

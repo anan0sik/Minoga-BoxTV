@@ -42,6 +42,7 @@ class KeyEventHandler(
     private val longPressMs: Long = LONG_PRESS_THRESHOLD_MS,
     private val onIntent: (ChannelListIntent) -> Unit,
     private val onOpenSettings: () -> Unit = {},
+    private val onOpenVod: () -> Unit = {},
     private val onScrollProgramDetails: ((Int) -> Unit)? = null,
     private val folderGridColumnsProvider: () -> Int = { 4 },
 ) {
@@ -130,6 +131,11 @@ class KeyEventHandler(
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                 when {
+                    state.isVodFocused -> {
+                        longPressDetector.reset()
+                        onOpenVod()
+                        true
+                    }
                     state.isSearchFocused -> {
                         longPressDetector.reset()
                         onIntent(ChannelListIntent.OpenSearch)
@@ -173,7 +179,8 @@ class KeyEventHandler(
         // ── D-Pad RIGHT ───────────────────────────────────────────────────────
         KeyEvent.KEYCODE_DPAD_RIGHT -> {
             when {
-                state.isGroupFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.SEARCH))
+                state.isGroupFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.VOD))
+                state.isVodFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.SEARCH))
                 state.isSearchFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.SETTINGS))
                 state.viewMode == ScreenViewMode.FOLDERS -> {
                     val count = state.folders.size
@@ -203,7 +210,8 @@ class KeyEventHandler(
         KeyEvent.KEYCODE_DPAD_LEFT -> {
             when {
                 state.isSettingsFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.SEARCH))
-                state.isSearchFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.GROUP_SELECTOR))
+                state.isSearchFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.VOD))
+                state.isVodFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.GROUP_SELECTOR))
                 state.viewMode == ScreenViewMode.FOLDERS -> {
                     val cur = state.focusedFolderIndex
                     val cols = folderGridColumnsProvider().coerceAtLeast(1)
@@ -367,7 +375,11 @@ class KeyEventHandler(
             KeyEvent.KEYCODE_DPAD_CENTER,
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                if (state.isSearchFocused) {
+                if (state.isVodFocused) {
+                    longPressDetector.reset()
+                    onOpenVod()
+                    true
+                } else if (state.isSearchFocused) {
                     longPressDetector.reset()
                     onIntent(ChannelListIntent.OpenSearch)
                     true

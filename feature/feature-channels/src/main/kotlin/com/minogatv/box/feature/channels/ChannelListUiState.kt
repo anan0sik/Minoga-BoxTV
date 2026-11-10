@@ -88,6 +88,9 @@ data class ChannelListUiState(
     /** Helper check for whether the search button is currently focused. */
     val isSearchFocused: Boolean get() = topBarFocus == TopBarFocus.SEARCH
 
+    /** Helper check for whether the VOD Media Library button is currently focused. */
+    val isVodFocused: Boolean get() = topBarFocus == TopBarFocus.VOD
+
     /** Helper check for whether the group selector pill is currently focused. */
     val isGroupFocused: Boolean get() = topBarFocus == TopBarFocus.GROUP_SELECTOR
 }
@@ -112,6 +115,7 @@ data class ChannelFolderItem(
 )
 
 enum class FolderIconType {
+    VOD,
     ALL,
     FAVORITES,
     CATEGORY,
@@ -123,6 +127,7 @@ enum class FolderIconType {
 enum class TopBarFocus {
     NONE,
     GROUP_SELECTOR,
+    VOD,
     SEARCH,
     SETTINGS,
 }
@@ -268,4 +273,5 @@ sealed class ChannelListIntent {
  */
 sealed interface ChannelListNavEvent {
     data class NavigateToPlayer(val channelId: Long, val catchupStartMs: Long? = null) : ChannelListNavEvent
+    data object NavigateToVod : ChannelListNavEvent
 }

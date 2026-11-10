@@ -10,8 +10,12 @@ package com.minogatv.box.core.model
  */
 data class WebConfig(
     val name: String = "Minoga TV",
-    val playlistUrl: String,
+    val playlistUrl: String = "",
     val epgUrl: String? = null,
+    val vodUrl: String? = null,
+    val vodLogin: String? = null,
+    val vodPassword: String? = null,
+    val vodKey: String? = null,
     val sourcePageUrl: String = Playlist.DEFAULT_WEB_CONFIG_URL,
 )
 

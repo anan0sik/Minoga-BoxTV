@@ -12,9 +12,20 @@ if ! command -v nginx >/dev/null 2>&1; then
   sudo apt-get install -y nginx
 fi
 
-sudo mkdir -p /opt/minogatvbox/web /opt/minogatvbox/server /var/www/minogatvbox/download
+sudo mkdir -p /opt/minogatvbox/web /opt/minogatvbox/server /var/www/minogatvbox/download/screenshots
 sudo cp "$SRC"/IptvMockServer*.class /opt/minogatvbox/server/
-sudo cp "$SRC"/index.html "$SRC"/config.json /opt/minogatvbox/web/
+sudo cp "$SRC"/index.html "$SRC"/tv.html "$SRC"/config.json /opt/minogatvbox/web/
+if ls "$SRC"/*.png >/dev/null 2>&1; then
+  sudo cp "$SRC"/*.png /var/www/minogatvbox/download/screenshots/
+  if [ -f "$SRC"/icon.png ]; then
+    sudo cp "$SRC"/icon.png /var/www/minogatvbox/download/icon.png
+  fi
+  sudo chown -R www-data:www-data /var/www/minogatvbox/download
+fi
+if ! sudo test -f /opt/minogatvbox/web/downloads.json; then
+  INIT_COUNT=$(sudo zgrep -h "GET /download/MinogaTVBox.apk" /var/log/nginx/access.log* 2>/dev/null | grep -E " (200|206) " | wc -l || echo 0)
+  printf '{\n  "downloads": %s\n}\n' "${INIT_COUNT:-0}" | sudo tee /opt/minogatvbox/web/downloads.json >/dev/null
+fi
 sudo chown -R www-data:www-data /opt/minogatvbox
 
 sudo cp "$SRC"/minogatvbox.service /etc/systemd/system/minogatvbox.service
