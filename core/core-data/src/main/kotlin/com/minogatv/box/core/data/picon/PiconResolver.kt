@@ -3,12 +3,16 @@ package com.minogatv.box.core.data.picon
 import android.content.Context
 import com.minogatv.box.core.database.dao.ChannelDao
 import com.minogatv.box.core.model.ChannelUtils
+import com.minogatv.box.core.model.Playlist
 import com.minogatv.box.core.network.di.BaseOkHttpClient
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 import javax.inject.Inject
@@ -106,31 +110,123 @@ class PiconResolver @Inject constructor(
 
     /**
      * Batch resolve and persist logos for all channels in the local database
-     * that currently have no `logoUrl`. Logos are set directly to high-res CDN URLs
-     * and cached to disk on demand by Coil without blocking network downloads.
+     * that currently have no `logoUrl` or have legacy broken URLs.
+     * Queries the Minoga TV Live EPG server (`/api/tv/epg/live`) first to obtain
+     * real XMLTV channel icons, with local fallback.
      *
      * @return Number of channels updated with new logos.
      */
     suspend fun resolveMissingLogos(): Int = withContext(Dispatchers.IO) {
-        val channelsWithoutLogo = channelDao.getChannelsWithoutLogo()
-        if (channelsWithoutLogo.isEmpty()) return@withContext 0
+        val allChannels = channelDao.getAll()
+        if (allChannels.isEmpty()) return@withContext 0
 
-        val updates = mutableListOf<Pair<Long, String>>()
-        for (channel in channelsWithoutLogo) {
-            val logo = resolveLogo(channel.name)
-            if (!logo.isNullOrBlank()) {
-                updates.add(channel.id to logo)
+        val candidates = allChannels.filter { ch ->
+            val u = ch.logoUrl?.trim().orEmpty()
+            if (u.isEmpty()) {
+                true
+            } else if (u.contains("vattik/picons-rtrs", ignoreCase = true) ||
+                u.contains("it999.github.io", ignoreCase = true)
+            ) {
+                true
+            } else if (u.startsWith("file://")) {
+                val f = File(u.removePrefix("file://"))
+                !f.exists() || f.length() < 100L
+            } else {
+                false
             }
         }
+        if (candidates.isEmpty()) return@withContext 0
+
+        val updates = mutableMapOf<Long, String>()
+
+        // 1. Fetch pre-indexed channel icons from Minoga TV server (/api/tv/epg/live)
+        val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+        val rawWebBase = prefs.getString("web_config_url", null)?.trim()?.takeIf { it.isNotBlank() }
+            ?: Playlist.DEFAULT_WEB_CONFIG_URL
+        val cleanBase = rawWebBase.trimEnd('/')
+        val serverBases = listOf(
+            "https://minogatvbox.duckdns.org",
+            if (cleanBase.startsWith("http://", ignoreCase = true)) "https://" + cleanBase.removePrefix("http://") else cleanBase,
+            cleanBase,
+        ).distinct()
+
+        val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+        for (base in serverBases) {
+            var baseSucceeded = false
+            for (chunk in candidates.chunked(200)) {
+                val sb = StringBuilder(chunk.size * 96 + 64)
+                sb.append("{\"url\":\"http://epg.one/epg2.xml.gz\",\"full\":false,\"channels\":[")
+                chunk.forEachIndexed { idx, ch ->
+                    if (idx > 0) sb.append(',')
+                    sb.append("{\"id\":").append(ch.id)
+                        .append(",\"tvgId\":\"").append(escapeJson(ch.epgChannelId)).append("\"")
+                        .append(",\"name\":\"").append(escapeJson(ch.name)).append("\"}")
+                }
+                sb.append("]}")
+
+                val req = Request.Builder()
+                    .url("$base/api/tv/epg/live")
+                    .post(sb.toString().toRequestBody(jsonMediaType))
+                    .header("Accept", "application/json")
+                    .build()
+
+                val respStr = try {
+                    okHttpClient.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) resp.body?.string() else null
+                    }
+                } catch (_: Throwable) {
+                    null
+                } ?: break
+
+                if (!respStr.startsWith("{")) break
+                val liveObj = try {
+                    JSONObject(respStr).optJSONObject("live")
+                } catch (_: Throwable) {
+                    null
+                } ?: break
+
+                baseSucceeded = true
+                for (ch in chunk) {
+                    val chObj = liveObj.optJSONObject(ch.id.toString()) ?: continue
+                    val ic = chObj.optString("ic").trim()
+                    if (ic.isNotEmpty()) {
+                        updates[ch.id] = ic
+                        val staleLocal = File(piconsDir, "picon_${ch.id}.png")
+                        if (staleLocal.exists()) staleLocal.delete()
+                    }
+                }
+            }
+            if (baseSucceeded) break
+        }
+
+        // 2. Clear any remaining legacy dead 404 URLs so UI shows clean TV badge instead of blank space
+        for (ch in candidates) {
+            if (!updates.containsKey(ch.id)) {
+                val u = ch.logoUrl?.trim().orEmpty()
+                if (u.contains("vattik/picons-rtrs", ignoreCase = true) ||
+                    u.contains("it999.github.io", ignoreCase = true) ||
+                    (u.startsWith("file://") && !File(u.removePrefix("file://")).exists())
+                ) {
+                    updates[ch.id] = ""
+                }
+            }
+        }
+
         if (updates.isEmpty()) return@withContext 0
 
-        // Batch in chunks of 100 to avoid locking SQLite for extended periods
-        for (chunk in updates.chunked(100)) {
+        val updateList = updates.entries.map { it.key to it.value }
+        for (chunk in updateList.chunked(100)) {
             channelDao.updateLogoUrls(chunk)
             kotlinx.coroutines.yield()
         }
-        return@withContext updates.size
+        return@withContext updateList.size
     }
+
+    private fun escapeJson(s: String): String =
+        s.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", " ")
+            .replace("\r", " ")
 
     /**
      * Download and persistently cache all remote channel logos into internal storage (filesDir/picons/),

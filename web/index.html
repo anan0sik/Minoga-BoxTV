@@ -1638,7 +1638,7 @@
         const saved = JSON.parse(localStorage.getItem('minoga_last_setup') || '{}');
         if (saved.name) document.getElementById('input-name').value = saved.name;
         if (saved.playlistUrl) document.getElementById('input-playlist').value = saved.playlistUrl;
-        if (saved.epgUrl) document.getElementById('input-epg').value = saved.epgUrl;
+        if (saved.epgUrl && saved.epgUrl !== 'http://epg.one/epg2.xml.gz') document.getElementById('input-epg').value = saved.epgUrl;
         if (saved.vodUrl) document.getElementById('input-vod-url').value = saved.vodUrl;
         if (saved.vodLogin) document.getElementById('input-vod-login').value = saved.vodLogin;
         if (saved.vodKey) document.getElementById('input-vod-key').value = saved.vodKey;
@@ -1716,24 +1716,46 @@
       reader.readAsText(file, 'UTF-8');
     }
 
+    function cleanVodPortalUrlJs(raw) {
+      let s = String(raw || '').replace(/\\\//g, '/').trim();
+      if (!s) return '';
+      while (/^[a-z]{3,7}:\/+[a-z]{3,7}:\/+/i.test(s)) {
+        s = s.replace(/^[a-z]{3,7}:\/+/i, '');
+      }
+      if (/^h+t+p+s:\/+/i.test(s)) {
+        s = s.replace(/^h+t+p+s:\/+/i, 'https://');
+      } else if (/^h+t+p+:\/+/i.test(s)) {
+        s = s.replace(/^h+t+p+:\/+/i, 'http://');
+      }
+      return s;
+    }
+
     function autoParsePortalInput(sourceId) {
       const el = document.getElementById(sourceId);
       if (!el) return;
-      const val = (el.value || '').trim();
-      const m = val.match(/^(?:https?:\/\/)?portal::(?:\[([^\]]*)\])?\s*(https?:\/\/.+)$/i);
-      if (!m) return;
-      const bracket = m[1] || '';
-      const cleanUrl = (m[2] || '').trim();
-      let extractedKey = '';
-      bracket.split(';').forEach(part => {
-        if (part.trim().toLowerCase().startsWith('key:')) {
-          extractedKey = part.trim().substring(4).trim();
-        }
-      });
+      let val = (el.value || '').replace(/\\\//g, '/').trim();
       const urlEl = document.getElementById('input-vod-url');
       const keyEl = document.getElementById('input-vod-key');
-      if (urlEl && cleanUrl) urlEl.value = cleanUrl;
-      if (keyEl && extractedKey) keyEl.value = extractedKey;
+      const m = val.match(/^(?:[a-z]+:\/+)?portal::(?:\[([^\]]*)\])?\s*(.*)$/i);
+      if (m) {
+        const bracket = m[1] || '';
+        const cleanUrl = cleanVodPortalUrlJs(m[2] || '');
+        let extractedKey = '';
+        bracket.split(';').forEach(part => {
+          if (part.trim().toLowerCase().startsWith('key:')) {
+            extractedKey = part.trim().substring(4).trim();
+          }
+        });
+        if (urlEl && cleanUrl) urlEl.value = cleanUrl;
+        if (keyEl && extractedKey) keyEl.value = extractedKey;
+      } else if (sourceId === 'input-vod-url' && val) {
+        const cleaned = cleanVodPortalUrlJs(val);
+        if (cleaned !== el.value) el.value = cleaned;
+        const subMatch = cleaned.match(/^https?:\/\/([0-9a-f]{8,20})\.([a-z0-9.-]+\.[a-z]{2,})(?:\/.*)?$/i);
+        if (subMatch && keyEl && !keyEl.value.trim()) {
+          keyEl.value = subMatch[1];
+        }
+      }
     }
 
     async function handleSubmitConfig(event) {
@@ -1750,8 +1772,8 @@
 
       const name = document.getElementById('input-name').value.trim() || 'Minoga TV';
       let playlistUrl = document.getElementById('input-playlist').value.trim();
-      const epgUrl = document.getElementById('input-epg').value.trim() || 'http://epg.one/epg2.xml.gz';
-      const vodUrl = (document.getElementById('input-vod-url').value || '').trim();
+      const epgUrl = document.getElementById('input-epg').value.trim();
+      const vodUrl = cleanVodPortalUrlJs((document.getElementById('input-vod-url').value || '').trim());
       const vodLogin = (document.getElementById('input-vod-login').value || '').trim();
       const vodPassword = (document.getElementById('input-vod-password').value || '').trim();
       const vodKey = (document.getElementById('input-vod-key').value || '').trim();

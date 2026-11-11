@@ -110,7 +110,7 @@ class ChannelListViewModel @Inject constructor(
 
     private fun resolveMissingLogosAndEpg() {
         viewModelScope.launch(Dispatchers.IO) {
-            delay(15000L) // Wait for UI and initial channels list to render smoothly
+            delay(1500L) // Wait briefly for initial UI render, then resolve channel logos from server
             try {
                 // Auto-resolve picons/logos for channels without logo in background batches
                 channelRepository.resolveMissingLogos()
@@ -211,7 +211,9 @@ class ChannelListViewModel @Inject constructor(
                 } else if (hadProgress) {
                     // Sync finished: refresh current programs on channels immediately
                     hadProgress = false
-                    nowMs.value = System.currentTimeMillis()
+                    val now = System.currentTimeMillis()
+                    nowMs.value = now
+                    refreshCurrentProgramsInPlace(now)
                 }
             }
         }
@@ -987,25 +989,98 @@ class ChannelListViewModel @Inject constructor(
 
     // ─── Private: now ticker ─────────────────────────────────────────────────
 
+    private suspend fun refreshCurrentProgramsInPlace(now: Long) {
+        val currentList = _uiState.value.channels
+        if (currentList.isEmpty()) return
+
+        val candidateIds = buildList {
+            for (item in currentList) {
+                val rawId = item.channel.epgChannelId.trim()
+                if (rawId.isNotEmpty()) {
+                    add(rawId)
+                    val lower = rawId.lowercase(java.util.Locale.ROOT)
+                    if (lower != rawId) add(lower)
+                }
+            }
+        }.distinct()
+
+        if (candidateIds.isEmpty()) return
+
+        val activePrograms = withContext(Dispatchers.IO) {
+            runCatching {
+                candidateIds.chunked(400).flatMap { chunk ->
+                    epgDao.getCurrentProgramsForIds(chunk, now)
+                }
+            }.getOrDefault(emptyList())
+        }
+
+        val activeByEpgId = HashMap<String, EpgProgramEntity>(activePrograms.size * 2)
+        val activeByName = HashMap<String, EpgProgramEntity>(activePrograms.size * 2)
+        for (prog in activePrograms) {
+            if (prog.startMs <= now && prog.endMs > now) {
+                activeByEpgId[prog.channelEpgId] = prog
+                activeByName[prog.channelEpgId.lowercase(java.util.Locale.ROOT)] = prog
+            }
+        }
+
+        _uiState.update { state ->
+            if (state.channels.isEmpty()) return@update state
+            val updated = state.channels.map { item ->
+                val ch = item.channel
+                val normName = ch.name.trim().lowercase(java.util.Locale.ROOT)
+                val simplified = ChannelUtils.normalizeChannelName(ch.name).lowercase(java.util.Locale.ROOT)
+                val currentEntity = (if (ch.epgChannelId.isNotBlank()) {
+                    activeByEpgId[ch.epgChannelId] ?: activeByName[ch.epgChannelId.lowercase(java.util.Locale.ROOT)]
+                } else null)
+                    ?: activeByName[normName]
+                    ?: activeByName[simplified]
+
+                val domProg = currentEntity?.toDomain() ?: item.currentProgram?.takeIf { it.endMs > now }
+                val progress = domProg?.let { p ->
+                    if (p.endMs > p.startMs) {
+                        ((now - p.startMs).toFloat() / (p.endMs - p.startMs).toFloat()).coerceIn(0f, 1f)
+                    } else 0f
+                } ?: 0f
+                item.copy(
+                    currentProgram = domProg,
+                    epgProgress = progress,
+                )
+            }
+            state.copy(channels = updated)
+        }
+    }
+
     private fun startNowTicker() {
         viewModelScope.launch {
             while (true) {
-                delay(60_000L) // update every minute
+                delay(30_000L) // check every 30 seconds so ended programmes switch promptly
                 val now = System.currentTimeMillis()
                 nowMs.value = now
-                _uiState.update { state ->
-                    if (state.channels.isEmpty()) state
-                    else {
-                        val updated = state.channels.map { item ->
-                            val prog = item.currentProgram
-                            if (prog != null && prog.endMs > prog.startMs) {
-                                val progress = ((now - prog.startMs).toFloat() / (prog.endMs - prog.startMs).toFloat()).coerceIn(0f, 1f)
-                                item.copy(epgProgress = progress)
-                            } else {
-                                item
+                val currentChannels = _uiState.value.channels
+                if (currentChannels.isEmpty()) continue
+
+                val hasExpiredProgram = currentChannels.any { item ->
+                    val prog = item.currentProgram
+                    prog != null && prog.endMs <= now
+                }
+
+                if (hasExpiredProgram) {
+                    refreshCurrentProgramsInPlace(now)
+                } else {
+                    _uiState.update { state ->
+                        if (state.channels.isEmpty()) state
+                        else {
+                            val updated = state.channels.map { item ->
+                                val prog = item.currentProgram
+                                if (prog != null && prog.endMs > prog.startMs) {
+                                    val progress = ((now - prog.startMs).toFloat() / (prog.endMs - prog.startMs).toFloat()).coerceIn(0f, 1f)
+                                    item.copy(epgProgress = progress)
+                                } else {
+                                    item
+                                }
                             }
+                            state.copy(channels = updated)
                         }
-                        state.copy(channels = updated)
                     }
                 }
             }

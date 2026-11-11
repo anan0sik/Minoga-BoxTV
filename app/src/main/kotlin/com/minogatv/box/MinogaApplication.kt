@@ -27,12 +27,18 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.minogatv.box.core.network.di.BaseOkHttpClient
+import okhttp3.OkHttpClient
 
 @HiltAndroidApp
 class MinogaApplication : Application(), Configuration.Provider, ImageLoaderFactory {
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
+
+    @Inject
+    @BaseOkHttpClient
+    lateinit var baseOkHttpClient: OkHttpClient
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -52,6 +58,9 @@ class MinogaApplication : Application(), Configuration.Provider, ImageLoaderFact
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
+            .okHttpClient {
+                if (::baseOkHttpClient.isInitialized) baseOkHttpClient else OkHttpClient()
+            }
             .memoryCache {
                 MemoryCache.Builder(this)
                     .maxSizePercent(0.20)

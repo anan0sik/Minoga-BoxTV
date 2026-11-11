@@ -6,7 +6,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.minogatv.box.core.database.dao.ChannelDao
 import com.minogatv.box.core.database.dao.EpgDao
+import com.minogatv.box.core.database.dao.FavoriteDao
 import com.minogatv.box.core.database.dao.PlaylistDao
+import com.minogatv.box.core.database.entity.FavoriteChannelEntity
 import com.minogatv.box.core.data.catchup.CatchupUrlBuilder
 import com.minogatv.box.core.data.mapper.toDomain
 import com.minogatv.box.core.model.Channel
@@ -70,6 +72,8 @@ data class PlayerUiState(
     val isAudioOnly: Boolean = false,
     /** Whether archive/catch-up is supported for the current channel (taking settings override into account). */
     val isArchiveSupported: Boolean = false,
+    /** Whether the current channel is in Favorites. */
+    val isFavorite: Boolean = false,
 )
 
 @HiltViewModel
@@ -78,6 +82,7 @@ class PlayerViewModel @Inject constructor(
     private val channelDao: ChannelDao,
     private val epgDao: EpgDao,
     private val playlistDao: PlaylistDao,
+    private val favoriteDao: FavoriteDao,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -146,6 +151,9 @@ class PlayerViewModel @Inject constructor(
                 val forcedType = getForcedCatchupType()
                 val isSupported = directChannel.hasArchive(forcedType)
                 val enterCatchup = catchupMs != null && isSupported
+                val directFav = runCatching {
+                    favoriteDao.isFavorite(currentProfileId, directChannel.id)
+                }.getOrDefault(directChannel.isFavorite)
                 _uiState.update {
                     it.copy(
                         channel = directChannel,
@@ -153,6 +161,7 @@ class PlayerViewModel @Inject constructor(
                         catchupStartMs = if (enterCatchup) catchupMs else null,
                         isCatchupMode = enterCatchup,
                         isArchiveSupported = isSupported,
+                        isFavorite = directFav,
                         isBuffering = true,
                         errorMessage = null,
                     )
@@ -176,6 +185,9 @@ class PlayerViewModel @Inject constructor(
             }
             val forcedType = getForcedCatchupType()
             val isSupported = selected?.hasArchive(forcedType) == true
+            val isFav = selected?.let {
+                runCatching { favoriteDao.isFavorite(currentProfileId, it.id) }.getOrDefault(it.isFavorite)
+            } ?: false
 
             _uiState.update {
                 it.copy(
@@ -184,14 +196,18 @@ class PlayerViewModel @Inject constructor(
                     channel = selected,
                     playlist = selectedPlaylist,
                     isArchiveSupported = isSupported,
+                    isFavorite = isFav,
                 )
             }
 
-            selected?.let {
+            if (selected != null) {
                 if (catchupMs == null) {
-                    loadEpgForChannel(it)
+                    loadEpgForChannel(selected)
                 }
-                saveLastWatchedChannel(it.id)
+                saveLastWatchedChannel(selected.id)
+            } else {
+                // Target channel does not exist and DB has no channels — exit back to channel list
+                _exitPlayerEvent.tryEmit(Unit)
             }
             scheduleOsdHide()
         }
@@ -336,13 +352,56 @@ class PlayerViewModel @Inject constructor(
         }
         viewModelScope.launch {
             val playlist = playlistDao.getById(target.playlistId)?.toDomain()
-            if (playlist != null) {
-                _uiState.update { it.copy(playlist = playlist) }
+            val isFav = runCatching { favoriteDao.isFavorite(currentProfileId, target.id) }.getOrDefault(target.isFavorite)
+            val forcedType = getForcedCatchupType()
+            val isSupported = target.hasArchive(forcedType)
+            _uiState.update {
+                it.copy(
+                    playlist = playlist ?: it.playlist,
+                    isFavorite = isFav,
+                    isArchiveSupported = isSupported,
+                )
             }
             loadEpgForChannel(target)
             saveLastWatchedChannel(target.id)
         }
         scheduleOsdHide()
+    }
+
+    fun toggleFavorite() {
+        val currentChannel = _uiState.value.channel ?: return
+        viewModelScope.launch {
+            val isFavNow = runCatching { favoriteDao.isFavorite(currentProfileId, currentChannel.id) }
+                .getOrDefault(_uiState.value.isFavorite)
+            val nextFav = !isFavNow
+            if (nextFav) {
+                val count = runCatching { favoriteDao.getFavoriteCount(currentProfileId) }.getOrDefault(0)
+                favoriteDao.addFavorite(
+                    FavoriteChannelEntity(
+                        profileId = currentProfileId,
+                        channelId = currentChannel.id,
+                        sortOrder = count,
+                    )
+                )
+                channelDao.setFavoriteFlag(currentChannel.id, true)
+            } else {
+                favoriteDao.removeFavorite(currentProfileId, currentChannel.id)
+                channelDao.setFavoriteFlag(currentChannel.id, false)
+            }
+            val updatedChannel = currentChannel.copy(isFavorite = nextFav)
+            val updatedList = _uiState.value.channelList.map {
+                if (it.id == currentChannel.id) updatedChannel else it
+            }
+            _uiState.update {
+                it.copy(
+                    isFavorite = nextFav,
+                    channel = updatedChannel,
+                    channelList = updatedList,
+                    isOsdVisible = true,
+                )
+            }
+            scheduleOsdHide()
+        }
     }
 
     fun toggleOsd() {

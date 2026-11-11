@@ -44,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -91,12 +92,39 @@ fun ChannelSearchDialog(
         }
     }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
-    }
-
     val config = LocalConfiguration.current
     val isCompact = config.screenWidthDp < 600 || config.screenHeightDp < 500
+    val isPortrait = config.screenHeightDp > config.screenWidthDp
+    var showTvKeyboard by remember { mutableStateOf(!isPortrait) }
+    var kbLang by remember { mutableStateOf("ru") }
+    val firstKeyFocusRequester = remember { FocusRequester() }
+    val firstResultFocusRequester = remember { FocusRequester() }
+
+    val ruRows = remember {
+        listOf(
+            listOf("А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "Й"),
+            listOf("К", "Л", "М", "Н", "О", "П", "Р", "С", "Т", "У"),
+            listOf("Ф", "Х", "Ц", "Ч", "Ш", "Щ", "Ъ", "Ы", "Ь", "Э"),
+            listOf("Ю", "Я", "0", "1", "2", "3", "4", "5", "6", "7"),
+        )
+    }
+    val enRows = remember {
+        listOf(
+            listOf("A", "B", "C", "D", "E", "F", "G", "H", "I", "J"),
+            listOf("K", "L", "M", "N", "O", "P", "Q", "R", "S", "T"),
+            listOf("U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3"),
+            listOf("4", "5", "6", "7", "8", "9", "-", "+", "⌫", "✕"),
+        )
+    }
+    val activeRows = if (kbLang == "ru") ruRows else enRows
+
+    LaunchedEffect(showTvKeyboard) {
+        if (showTvKeyboard) {
+            runCatching { firstKeyFocusRequester.requestFocus() }
+        } else {
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -107,15 +135,16 @@ fun ChannelSearchDialog(
                 .fillMaxSize()
                 .background(ChannelDesignTokens.MidnightBgGradientStart.copy(alpha = 0.95f))
                 .padding(
-                    horizontal = if (isCompact) 12.dp else 48.dp,
-                    vertical = if (isCompact) 12.dp else 24.dp,
+                    horizontal = if (isCompact) 12.dp else 40.dp,
+                    vertical = if (isCompact) 10.dp else 18.dp,
                 ),
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Header with Search Field and Close
+                // Header with Search Field, Keyboard Toggle, and Close
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     OutlinedTextField(
                         value = query,
@@ -149,16 +178,101 @@ fun ChannelSearchDialog(
                             .focusRequester(focusRequester),
                     )
 
-                    Spacer(Modifier.width(16.dp))
+                    TvSearchKeyChip(
+                        label = if (showTvKeyboard) "⌨ Скрыть клав." else "⌨ Клавиатура ТВ",
+                        isPrimary = showTvKeyboard,
+                        onClick = { showTvKeyboard = !showTvKeyboard },
+                    )
 
-                    IconButton(
+                    TvSearchKeyChip(
+                        label = "✕ Закрыть",
+                        isPrimary = false,
                         onClick = onDismiss,
+                    )
+                }
+
+                // Classic АБВГД / ABCDEF TV Keyboard for D-Pad Remotes
+                AnimatedVisibility(
+                    visible = showTvKeyboard,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut(),
+                ) {
+                    Column(
                         modifier = Modifier
-                            .size(48.dp)
+                            .fillMaxWidth()
+                            .padding(top = 10.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF1E2638)),
+                            .background(Color(0xFF0D1322))
+                            .border(1.dp, Color(0x4400E5FF), RoundedCornerShape(12.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Закрыть", tint = Color.White)
+                        activeRows.forEachIndexed { rIdx, rowKeys ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                rowKeys.forEachIndexed { cIdx, keyLabel ->
+                                    TvSearchKeyChip(
+                                        label = keyLabel,
+                                        isPrimary = false,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .let { mod ->
+                                                if (rIdx == 0 && cIdx == 0) mod.focusRequester(firstKeyFocusRequester) else mod
+                                            },
+                                        onClick = {
+                                            when (keyLabel) {
+                                                "⌫" -> if (query.isNotEmpty()) query = query.dropLast(1)
+                                                "✕" -> query = ""
+                                                else -> query += keyLabel.lowercase()
+                                            }
+                                            focusedResultIndex = 0
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            TvSearchKeyChip(
+                                label = if (kbLang == "ru") "🌐 RU → EN" else "🌐 EN → RU",
+                                isPrimary = true,
+                                modifier = Modifier.weight(2f),
+                                onClick = { kbLang = if (kbLang == "ru") "en" else "ru" },
+                            )
+                            TvSearchKeyChip(
+                                label = "␣ ПРОБЕЛ",
+                                isPrimary = false,
+                                modifier = Modifier.weight(3.8f),
+                                onClick = { query += " " },
+                            )
+                            TvSearchKeyChip(
+                                label = "⌫",
+                                isPrimary = false,
+                                modifier = Modifier.weight(1f),
+                                onClick = { if (query.isNotEmpty()) query = query.dropLast(1) },
+                            )
+                            TvSearchKeyChip(
+                                label = "✕",
+                                isPrimary = false,
+                                modifier = Modifier.weight(1f),
+                                onClick = { query = "" },
+                            )
+                            TvSearchKeyChip(
+                                label = "↵ ENTER (НАЙТИ)",
+                                isPrimary = true,
+                                modifier = Modifier.weight(2.6f),
+                                onClick = {
+                                    if (filtered.isNotEmpty()) {
+                                        runCatching { firstResultFocusRequester.requestFocus() }
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
 
@@ -243,13 +357,14 @@ fun ChannelSearchDialog(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        items(
+                        itemsIndexed(
                             items = filtered,
-                            key = { it.channel.id },
-                        ) { item ->
+                            key = { _, it -> it.channel.id },
+                        ) { idx, item ->
                             SearchResultItem(
                                 item = item,
                                 onClick = { onSelectChannel(item.channel.id) },
+                                modifier = if (idx == 0) Modifier.focusRequester(firstResultFocusRequester) else Modifier,
                             )
                         }
                     }
@@ -260,17 +375,67 @@ fun ChannelSearchDialog(
 }
 
 @Composable
+private fun TvSearchKeyChip(
+    label: String,
+    isPrimary: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                when {
+                    isFocused -> ChannelDesignTokens.NeonCyan.copy(alpha = 0.3f)
+                    isPrimary -> ChannelDesignTokens.NeonCyan.copy(alpha = 0.16f)
+                    else -> Color(0xFF161E31)
+                }
+            )
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = when {
+                    isFocused -> ChannelDesignTokens.NeonCyan
+                    isPrimary -> ChannelDesignTokens.NeonCyan.copy(alpha = 0.65f)
+                    else -> Color(0x26FFFFFF)
+                },
+                shape = RoundedCornerShape(8.dp),
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .clickable(onClick = onClick)
+            .focusable()
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = when {
+                isFocused -> Color.White
+                isPrimary -> ChannelDesignTokens.NeonCyan
+                else -> Color(0xFFF1F5F9)
+            },
+            fontSize = 12.sp,
+            fontWeight = if (isFocused || isPrimary) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun SearchResultItem(
     item: ChannelDisplayItem,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
+            .onFocusChanged { isFocused = it.isFocused }
             .tvFocusCard(isFocused = isFocused, cornerRadius = 14.dp)
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .focusable(),
         color = Color.Transparent,
     ) {
         Row(
@@ -280,6 +445,14 @@ private fun SearchResultItem(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Channel Logo
+            val validSearchLogo = remember(item.channel.logoUrl) {
+                val u = item.channel.logoUrl?.trim().orEmpty()
+                if (u.isEmpty() ||
+                    u.contains("vattik/picons-rtrs", ignoreCase = true) ||
+                    u.contains("it999.github.io", ignoreCase = true)
+                ) null else u
+            }
+            var logoLoadError by remember(validSearchLogo) { mutableStateOf(false) }
             Box(
                 modifier = Modifier
                     .size(42.dp)
@@ -287,15 +460,16 @@ private fun SearchResultItem(
                     .background(Color(0xFF1E2436)),
                 contentAlignment = Alignment.Center,
             ) {
-                if (!item.channel.logoUrl.isNullOrEmpty()) {
+                if (validSearchLogo != null && !logoLoadError) {
                     AsyncImage(
-                        model = item.channel.logoUrl,
+                        model = validSearchLogo,
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
+                        onError = { logoLoadError = true },
                         modifier = Modifier.size(36.dp),
                     )
                 } else {
-                    Icon(Icons.Filled.Tv, contentDescription = null, tint = Color(0xFF2979FF), modifier = Modifier.size(22.dp))
+                    Icon(Icons.Filled.Tv, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(22.dp))
                 }
             }
 

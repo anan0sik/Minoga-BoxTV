@@ -103,6 +103,9 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.minogatv.box.feature.player.IptvMediaSourceHelper
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.minogatv.box.core.model.Playlist
+import com.minogatv.box.feature.settings.fetchPersonalFeedbackItems
+import com.minogatv.box.feature.settings.getOrCreateFeedbackClientId
 import com.minogatv.box.feature.ui.RemoteControlHintBar
 import com.minogatv.box.feature.ui.RemoteHint
 import com.minogatv.box.feature.update.AppUpdateManager
@@ -255,13 +258,51 @@ fun ChannelListScreen(
     val isCompactScreen = isPortrait || configuration.screenHeightDp < 500 || configuration.screenWidthDp < 750
     val currentFolderCols by rememberUpdatedState(if (isPortrait) 2 else 4)
 
-    // Release hardware codecs on lifecycle pause/stop so fullscreen player doesn't crash
+    val syncPreviewPlayback: () -> Unit = {
+        val state = currentUiState
+        val isPreviewEnabled = try {
+            val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+            prefs.getBoolean("channel_preview_enabled", true)
+        } catch (_: Exception) { true }
+
+        val previewId = if (isPreviewEnabled) state.livePreviewChannelId else null
+        if (state.viewMode == ScreenViewMode.CHANNELS && previewId != null) {
+            val previewChannel = state.channels.firstOrNull { it.channel.id == previewId }?.channel
+            if (previewChannel != null && previewChannel.streamUrl.isNotBlank()) {
+                previewPlayer.setMediaItem(MediaItem.fromUri(previewChannel.streamUrl))
+                previewPlayer.prepare()
+                previewPlayer.play()
+            } else {
+                previewPlayer.stop()
+                previewPlayer.clearMediaItems()
+            }
+        } else {
+            previewPlayer.stop()
+            previewPlayer.clearMediaItems()
+        }
+    }
+
+    // Release hardware codecs on lifecycle pause/stop so fullscreen player doesn't crash,
+    // and cleanly resume preview & focus when returning from background / launcher on TV sticks.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, previewPlayer) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                previewPlayer.stop()
-                previewPlayer.clearMediaItems()
+            when (event) {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    previewPlayer.stop()
+                    previewPlayer.clearMediaItems()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    syncPreviewPlayback()
+                    runCatching {
+                        if (currentUiState.viewMode == ScreenViewMode.CHANNELS) {
+                            listFocusRequester.requestFocus()
+                        } else {
+                            rootFocusRequester.requestFocus()
+                        }
+                    }
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -282,27 +323,8 @@ fun ChannelListScreen(
         }
     }
 
-    LaunchedEffect(uiState.livePreviewChannelId, uiState.viewMode) {
-        val isPreviewEnabled = try {
-            val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
-            prefs.getBoolean("channel_preview_enabled", true)
-        } catch (_: Exception) { true }
-
-        val previewId = if (isPreviewEnabled) uiState.livePreviewChannelId else null
-        if (uiState.viewMode == ScreenViewMode.CHANNELS && previewId != null) {
-            val previewChannel = uiState.channels.firstOrNull { it.channel.id == previewId }?.channel
-            if (previewChannel != null && previewChannel.streamUrl.isNotBlank()) {
-                previewPlayer.setMediaItem(MediaItem.fromUri(previewChannel.streamUrl))
-                previewPlayer.prepare()
-                previewPlayer.play()
-            } else {
-                previewPlayer.stop()
-                previewPlayer.clearMediaItems()
-            }
-        } else {
-            previewPlayer.stop()
-            previewPlayer.clearMediaItems()
-        }
+    LaunchedEffect(uiState.livePreviewChannelId, uiState.viewMode, uiState.channels.size) {
+        syncPreviewPlayback()
     }
 
     val detailsScrollState = rememberScrollState()
@@ -331,8 +353,34 @@ fun ChannelListScreen(
         )
     }
 
+    var exitDialogButtonIndex by remember(uiState.isExitConfirmOpen) { mutableStateOf(1) }
+    var exitDialogOpenedAtMs by remember { mutableStateOf(0L) }
+    LaunchedEffect(uiState.isExitConfirmOpen) {
+        if (uiState.isExitConfirmOpen) {
+            exitDialogButtonIndex = 1
+            exitDialogOpenedAtMs = System.currentTimeMillis()
+        }
+    }
+
+    val finishApp: () -> Unit = remember(context, previewPlayer) {
+        {
+            runCatching {
+                previewPlayer.stop()
+                previewPlayer.clearMediaItems()
+            }
+            val activity = context.findActivity() ?: (context as? Activity)
+            try {
+                activity?.finishAffinity()
+            } catch (_: Exception) {
+                activity?.finish()
+            }
+        }
+    }
+
     BackHandler(enabled = uiState.isExitConfirmOpen) {
-        viewModel.onIntent(ChannelListIntent.DismissExitConfirm)
+        if (System.currentTimeMillis() - exitDialogOpenedAtMs > 250L) {
+            finishApp()
+        }
     }
 
     BackHandler(enabled = !uiState.isExitConfirmOpen && uiState.isContextMenuOpen) {
@@ -374,17 +422,64 @@ fun ChannelListScreen(
     }
 
     // ── Register screen key handler so D-Pad & gesture keys work even in InputMode.Touch
-    DisposableEffect(screenKeyDispatcher, keyHandler) {
+    DisposableEffect(screenKeyDispatcher, keyHandler, lifecycleOwner) {
         val handler: (KeyEvent) -> Boolean = { event ->
             val state = currentUiState
-            if (state.isSearchOpen || state.pendingPinFolder != null || state.isExitConfirmOpen || state.isContextMenuOpen) {
+            if (state.isExitConfirmOpen) {
+                when (event.action) {
+                    KeyEvent.ACTION_DOWN -> when (event.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            exitDialogButtonIndex = 0
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            exitDialogButtonIndex = 1
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER -> true
+                        KeyEvent.KEYCODE_BACK,
+                        KeyEvent.KEYCODE_ESCAPE -> {
+                            if (System.currentTimeMillis() - exitDialogOpenedAtMs > 250L) {
+                                finishApp()
+                            }
+                            true
+                        }
+                        else -> true
+                    }
+                    KeyEvent.ACTION_UP -> when (event.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                            if (exitDialogButtonIndex == 1) {
+                                finishApp()
+                            } else {
+                                viewModel.onIntent(ChannelListIntent.DismissExitConfirm)
+                            }
+                            true
+                        }
+                        KeyEvent.KEYCODE_BACK,
+                        KeyEvent.KEYCODE_ESCAPE -> true
+                        else -> true
+                    }
+                    else -> false
+                }
+            } else if (state.isSearchOpen || state.pendingPinFolder != null || state.isContextMenuOpen) {
                 false
             } else {
                 keyHandler.onKeyEvent(event, state)
             }
         }
         screenKeyDispatcher?.activeHandler = handler
+        val resumeKeyObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                screenKeyDispatcher?.activeHandler = handler
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(resumeKeyObserver)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(resumeKeyObserver)
             if (screenKeyDispatcher?.activeHandler === handler) {
                 screenKeyDispatcher.activeHandler = null
             }
@@ -533,6 +628,96 @@ fun ChannelListScreen(
                 }
             }
 
+            // ── Developer Reply Notification Banner ───────────────────────────
+            var hasUnreadDevReply by remember { mutableStateOf(false) }
+            var latestDevReplySnippet by remember { mutableStateOf("") }
+            LaunchedEffect(Unit) {
+                val clientId = getOrCreateFeedbackClientId(prefs)
+                val webConfigUrl = prefs.getString("web_config_url", Playlist.DEFAULT_WEB_CONFIG_URL)
+                    ?.takeIf { it.isNotBlank() } ?: Playlist.DEFAULT_WEB_CONFIG_URL
+                val myItems = fetchPersonalFeedbackItems(webConfigUrl, clientId)
+                val repliedItems = myItems.filter { it.developerReply.isNotBlank() }
+                val lastSeenCount = prefs.getInt("last_seen_dev_reply_count", 0)
+                if (repliedItems.size > lastSeenCount) {
+                    hasUnreadDevReply = true
+                    latestDevReplySnippet = repliedItems.firstOrNull()?.developerReply.orEmpty()
+                }
+            }
+            AnimatedVisibility(
+                visible = hasUnreadDevReply,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xE60C1D33))
+                        .border(width = 0.9.dp, color = ChannelDesignTokens.NeonCyan.copy(alpha = 0.6f))
+                        .padding(
+                            horizontal = if (isCompactScreen) 10.dp else 20.dp,
+                            vertical = if (isCompactScreen) 5.dp else 7.dp,
+                        ),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                hasUnreadDevReply = false
+                                onNavigateToSettings()
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "🔔 Разработчик ответил на ваш вопрос: «$latestDevReplySnippet»",
+                            color = Color(0xFFE0F7FA),
+                            fontSize = if (isCompactScreen) 11.5.sp else 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(ChannelDesignTokens.NeonCyan)
+                                .clickable {
+                                    hasUnreadDevReply = false
+                                    onNavigateToSettings()
+                                }
+                                .padding(horizontal = 10.dp, vertical = 3.dp),
+                        ) {
+                            Text(
+                                text = "Посмотреть ответ",
+                                color = Color.Black,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { hasUnreadDevReply = false }
+                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                        ) {
+                            Text(
+                                text = "✕",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
+
             // ── EPG Sync Progress Bar UNDER TopBar (Search / Folders row) ─────
             val syncProgress = uiState.epgSyncProgress
             val syncStatus = uiState.epgSyncStatus
@@ -645,7 +830,7 @@ fun ChannelListScreen(
                         onPlayLive = { channelId -> navigateToPlayerSafe(channelId, null) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(if (uiState.isProgramDetailsOpen) 88.dp else 132.dp),
+                            .height((configuration.screenHeightDp.dp * 0.25f).coerceAtLeast(135.dp)),
                     )
 
                     // Переключатель вкладок: Каналы / Телепрограмма и Архив
@@ -795,13 +980,8 @@ fun ChannelListScreen(
                     }
                 }
             } else {
-                // Окно 2: Двухпанельный ТВ-макет (адаптивный для смартфонов и ТВ)
-                val previewHeight = when {
-                    isCompactScreen && uiState.isProgramDetailsOpen -> 52.dp
-                    isCompactScreen -> 68.dp
-                    uiState.isProgramDetailsOpen -> (120 * scaleFactor).coerceAtLeast(64f).dp
-                    else -> (170 * scaleFactor).coerceAtLeast(84f).dp
-                }
+                // Окно 2: Двухпанельный ТВ-макет (адаптивный для смартфонов и ТВ, превью 25% высоты экрана)
+                val previewHeight = (configuration.screenHeightDp.dp * 0.25f).coerceAtLeast(135.dp)
                 Row(
                     modifier = Modifier
                         .weight(1f)
@@ -1017,12 +1197,10 @@ fun ChannelListScreen(
 
         // ── Exit Confirmation Dialog
         if (uiState.isExitConfirmOpen) {
-            val context = LocalContext.current
             ExitConfirmDialog(
-                onConfirmExit = {
-                    val activity = context.findActivity() ?: (context as? Activity)
-                    activity?.finish()
-                },
+                selectedButtonIndex = exitDialogButtonIndex,
+                onSelectButtonIndex = { exitDialogButtonIndex = it },
+                onConfirmExit = finishApp,
                 onDismiss = {
                     viewModel.onIntent(ChannelListIntent.DismissExitConfirm)
                 },
@@ -1183,7 +1361,7 @@ private fun ChannelListItem(
                 Box(
                     modifier = Modifier
                         .width((5 * scaleFactor).coerceAtLeast(3f).dp)
-                        .height((38 * scaleFactor).coerceAtLeast(16f).dp)
+                        .height((56 * scaleFactor).coerceAtLeast(34f).dp)
                         .clip(RoundedCornerShape(topEnd = 3.dp, bottomEnd = 3.dp))
                         .background(ChannelDesignTokens.NeonCyan),
                 )
@@ -1194,10 +1372,10 @@ private fun ChannelListItem(
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     modifier = Modifier.padding(
-                        start = (8 * scaleFactor).coerceAtLeast(4f).dp,
+                        start = (4 * scaleFactor).coerceAtLeast(2f).dp,
                         end = (10 * scaleFactor).coerceAtLeast(5f).dp,
-                        top = (8 * scaleFactor).coerceAtLeast(3f).dp,
-                        bottom = (8 * scaleFactor).coerceAtLeast(3f).dp,
+                        top = (2 * scaleFactor).coerceAtLeast(1.5f).dp,
+                        bottom = (2 * scaleFactor).coerceAtLeast(1.5f).dp,
                     ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1218,11 +1396,11 @@ private fun ChannelListItem(
                         )
                     }
 
-                    // ── Channel logo in rounded container
+                    // ── Channel logo in rounded container (full height of the card contour)
                     ChannelLogo(
                         logoUrl = item.channel.logoUrl,
                         isFocused = isFocused,
-                        size = ((if (isFocused) 44 else 38) * scaleFactor).coerceAtLeast(22f).dp,
+                        size = ((if (isFocused) 64 else 58) * scaleFactor).coerceAtLeast(38f).dp,
                     )
 
                     Spacer(Modifier.width((10 * scaleFactor).coerceAtLeast(5f).dp))
@@ -1379,30 +1557,48 @@ private fun ChannelLogo(
     isFocused: Boolean,
     size: androidx.compose.ui.unit.Dp? = null,
 ) {
-    val actualSize = size ?: if (isFocused) 52.dp else 44.dp
+    val actualSize = size ?: if (isFocused) 64.dp else 58.dp
+    val validUrl = remember(logoUrl) {
+        val u = logoUrl?.trim().orEmpty()
+        if (u.isEmpty() ||
+            u.contains("vattik/picons-rtrs", ignoreCase = true) ||
+            u.contains("it999.github.io", ignoreCase = true)
+        ) {
+            null
+        } else {
+            u
+        }
+    }
+    var loadError by remember(validUrl) { mutableStateOf(false) }
+
     Box(
         modifier = Modifier
             .size(actualSize)
             .clip(RoundedCornerShape(8.dp))
-            .background(LogoPlaceholderBg),
+            .background(LogoPlaceholderBg)
+            .border(
+                width = if (isFocused) 1.2.dp else 0.8.dp,
+                color = if (isFocused) ChannelDesignTokens.NeonCyan.copy(alpha = 0.65f) else Color(0x2600E5FF),
+                shape = RoundedCornerShape(8.dp),
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        if (logoUrl != null) {
+        if (validUrl != null && !loadError) {
             AsyncImage(
-                model = logoUrl,
+                model = validUrl,
                 contentDescription = "Channel logo",
                 contentScale = ContentScale.Fit,
+                onError = { loadError = true },
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(4.dp),
+                    .padding(1.5.dp),
             )
         } else {
-            // Fallback placeholder dot
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(TextSecondary),
+            Icon(
+                imageVector = Icons.Filled.Tv,
+                contentDescription = null,
+                tint = if (isFocused) ChannelDesignTokens.NeonCyan else Color(0xFF4FC3F7),
+                modifier = Modifier.size((actualSize.value * 0.62f).coerceIn(18f, 36f).dp),
             )
         }
     }
@@ -1906,10 +2102,13 @@ private fun FolderGridCard(
     val cornerRadius = 10.dp
     val shape = RoundedCornerShape(cornerRadius)
 
-    // User requirement: Focused folder background is light/bright ("подкрашивай фон выделенной папки светлым")
+    // High-contrast dark obsidian-blue focus background so white text is always 100% legible on TV
     val cardBrush = when {
+        isFocused && isVodCard -> Brush.verticalGradient(
+            colors = listOf(Color(0xFF281E4B), Color(0xFF133A59)),
+        )
         isFocused -> Brush.verticalGradient(
-            colors = listOf(Color(0xFFF8FAFC), Color(0xFFE2E8F0)), // Bright luminous silver/slate
+            colors = listOf(Color(0xFF13243B), Color(0xFF0D1829)),
         )
         isVodCard -> Brush.verticalGradient(
             colors = listOf(Color(0xFF1E1B4B), Color(0xFF0E3A53)),
@@ -1935,9 +2134,10 @@ private fun FolderGridCard(
             .scale(scaleAnim)
             .clip(shape)
             .border(
-                width = if (isFocused) 2.5.dp else if (isVodCard || isMostUsed) 1.2.dp else 0.8.dp,
-                color = if (isFocused) Color(0xFF0284C7)
-                        else if (isVodCard) ChannelDesignTokens.NeonCyan.copy(alpha = 0.7f)
+                width = if (isFocused) 2.5.dp else if (isVodCard) 1.8.dp else if (isMostUsed) 1.2.dp else 0.8.dp,
+                color = if (isFocused && isVodCard) ChannelDesignTokens.AccentGold
+                        else if (isFocused) ChannelDesignTokens.NeonCyan
+                        else if (isVodCard) ChannelDesignTokens.AccentGold.copy(alpha = 0.85f)
                         else if (isMostUsed) Color(0x6600E5FF)
                         else Color(0x2200E5FF),
                 shape = shape,
@@ -1955,7 +2155,7 @@ private fun FolderGridCard(
                         .width(4.dp)
                         .height(38.dp)
                         .clip(RoundedCornerShape(topEnd = 2.dp, bottomEnd = 2.dp))
-                        .background(Color(0xFF0284C7)),
+                        .background(if (isVodCard) ChannelDesignTokens.AccentGold else ChannelDesignTokens.NeonCyan),
                 )
             }
 
@@ -1976,31 +2176,50 @@ private fun FolderGridCard(
                             .size(26.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(
-                                if (isFocused) Color(0xFF0284C7)
+                                if (isFocused && isVodCard) Color(0x44FBBF24)
+                                else if (isFocused) Color(0x3300E5FF)
                                 else if (isVodCard || isMostUsed) Color(0xFF1E2A44)
                                 else Color(0xFF161C2C),
                             )
                             .border(
                                 width = 0.8.dp,
-                                color = if (isFocused) Color(0xFF0284C7)
-                                        else if (isVodCard || isMostUsed) Color(0x6600E5FF)
+                                color = if (isFocused && isVodCard) ChannelDesignTokens.AccentGold
+                                        else if (isFocused) ChannelDesignTokens.NeonCyan
+                                        else if (isVodCard) ChannelDesignTokens.AccentGold.copy(alpha = 0.7f)
+                                        else if (isMostUsed) Color(0x6600E5FF)
                                         else Color(0x1F00E5FF),
                                 shape = RoundedCornerShape(6.dp),
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
-                        val (icon, tint) = when (folder.iconType) {
-                            FolderIconType.VOD -> Icons.Filled.Movie to (if (isFocused) Color.White else ChannelDesignTokens.NeonCyan)
-                            FolderIconType.ALL -> Icons.Filled.Tv to (if (isFocused) Color.White else ChannelDesignTokens.NeonCyan)
-                            FolderIconType.FAVORITES -> Icons.Filled.Favorite to (if (isFocused) Color(0xFFFFD700) else ChannelDesignTokens.AccentGold)
-                            FolderIconType.CATEGORY -> Icons.Filled.Folder to (if (isFocused) Color.White else Color(0xFF8193B2))
+                        when (folder.iconType) {
+                            FolderIconType.VOD -> Icon(
+                                imageVector = Icons.Filled.Movie,
+                                contentDescription = null,
+                                tint = ChannelDesignTokens.AccentGold,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            FolderIconType.ALL -> Icon(
+                                imageVector = Icons.Filled.Tv,
+                                contentDescription = null,
+                                tint = if (isFocused) Color.White else ChannelDesignTokens.NeonCyan,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            FolderIconType.FAVORITES -> Icon(
+                                imageVector = Icons.Filled.Favorite,
+                                contentDescription = null,
+                                tint = if (isFocused) Color(0xFFFFD700) else ChannelDesignTokens.AccentGold,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            FolderIconType.CATEGORY -> {
+                                Text(
+                                    text = resolveFolderCategoryEmoji(folder.title),
+                                    fontSize = 13.5.sp,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
+                            }
                         }
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = tint,
-                            modifier = Modifier.size(15.dp),
-                        )
                     }
 
                     Row(
@@ -2011,14 +2230,14 @@ private fun FolderGridCard(
                             Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(if (isFocused) Color(0xFFCBD5E1) else Color(0x3300E5FF))
-                                    .border(0.8.dp, if (isFocused) Color(0xFF0284C7) else Color(0x6600E5FF), RoundedCornerShape(4.dp))
+                                    .background(Color(0x38FBBF24))
+                                    .border(0.8.dp, ChannelDesignTokens.AccentGold, RoundedCornerShape(4.dp))
                                     .padding(horizontal = 5.dp, vertical = 1.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    text = "КАТАЛОГ",
-                                    color = if (isFocused) Color(0xFF0F172A) else ChannelDesignTokens.NeonCyan,
+                                    text = "🎬 КИНОЗАЛ",
+                                    color = Color(0xFFFFFBEB),
                                     fontSize = 7.5.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                 )
@@ -2027,8 +2246,8 @@ private fun FolderGridCard(
                             Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(if (isFocused) Color(0xFFCBD5E1) else Color(0x3300E5FF))
-                                    .border(0.8.dp, if (isFocused) Color(0xFF0284C7) else Color(0x6600E5FF), RoundedCornerShape(4.dp))
+                                    .background(Color(0x3300E5FF))
+                                    .border(0.8.dp, Color(0x6600E5FF), RoundedCornerShape(4.dp))
                                     .padding(horizontal = 4.dp, vertical = 1.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -2036,12 +2255,12 @@ private fun FolderGridCard(
                                 Icon(
                                     imageVector = Icons.Filled.Star,
                                     contentDescription = null,
-                                    tint = if (isFocused) Color(0xFFD97706) else ChannelDesignTokens.AccentGold,
+                                    tint = ChannelDesignTokens.AccentGold,
                                     modifier = Modifier.size(8.dp),
                                 )
                                 Text(
                                     text = "ЧАСТО",
-                                    color = if (isFocused) Color(0xFF0F172A) else ChannelDesignTokens.NeonCyan,
+                                    color = ChannelDesignTokens.NeonCyan,
                                     fontSize = 7.5.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                 )
@@ -2068,12 +2287,12 @@ private fun FolderGridCard(
                         if (!isVodCard) {
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
-                                color = if (isFocused) Color(0xFFCBD5E1) else Color(0x40131826),
-                                border = BorderStroke(0.8.dp, if (isFocused) Color(0xFF94A3B8) else Color(0x3300E5FF)),
+                                color = if (isFocused) Color(0x3300E5FF) else Color(0x40131826),
+                                border = BorderStroke(0.8.dp, if (isFocused) ChannelDesignTokens.NeonCyan else Color(0x3300E5FF)),
                             ) {
                                 Text(
                                     text = "${folder.channelCount}",
-                                    color = if (isFocused) Color(0xFF0F172A) else TextSecondary,
+                                    color = if (isFocused) Color.White else TextSecondary,
                                     fontSize = 9.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
@@ -2083,7 +2302,7 @@ private fun FolderGridCard(
                     }
                 }
 
-                // Bottom row: Title & count with crisp high contrast text against light background
+                // Bottom row: Title & count with crisp high contrast white text against dark obsidian background
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -2091,7 +2310,7 @@ private fun FolderGridCard(
                 ) {
                     Text(
                         text = folder.title,
-                        color = if (isFocused) Color(0xFF0F172A) else TextPrimary,
+                        color = if (isFocused) Color.White else if (isVodCard) Color(0xFFFFFBEB) else TextPrimary,
                         fontSize = 12.5.sp,
                         fontWeight = if (isVodCard || isMostUsed || isFocused) FontWeight.ExtraBold else FontWeight.SemiBold,
                         maxLines = 1,
@@ -2100,8 +2319,8 @@ private fun FolderGridCard(
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = if (isVodCard) "Фильмы • VOD" else "${folder.channelCount} кан.",
-                        color = if (isFocused) Color(0xFF0284C7) else if (isVodCard) ChannelDesignTokens.NeonCyan else TextSecondary,
+                        text = if (isVodCard) "Фильмы • Сериалы" else "${folder.channelCount} кан.",
+                        color = if (isVodCard) ChannelDesignTokens.AccentGold else if (isFocused) ChannelDesignTokens.NeonCyan else TextSecondary,
                         fontSize = 10.sp,
                         fontWeight = if (isFocused || isVodCard) FontWeight.Bold else FontWeight.Normal,
                     )
@@ -2420,6 +2639,25 @@ private fun EmptyChannelsView(
                 }
             }
         }
+    }
+}
+
+private fun resolveFolderCategoryEmoji(title: String): String {
+    val g = title.lowercase(Locale.ROOT)
+    return when {
+        g.contains("кино") || g.contains("фильм") || g.contains("cinema") || g.contains("movie") || g.contains("сериал") -> "🎬"
+        g.contains("спорт") || g.contains("sport") || g.contains("футбол") || g.contains("матч") || g.contains("хоккей") || g.contains("бокс") -> "⚽"
+        g.contains("детск") || g.contains("kids") || g.contains("мульт") || g.contains("малыш") -> "🧸"
+        g.contains("музык") || g.contains("music") || g.contains("радио") || g.contains("radio") -> "🎵"
+        g.contains("новост") || g.contains("news") || g.contains("инфо") -> "📰"
+        g.contains("познават") || g.contains("discovery") || g.contains("наук") || g.contains("природ") || g.contains("doc") || g.contains("истор") || g.contains("животн") || g.contains("путешест") -> "🌍"
+        g.contains("18+") || g.contains("взросл") || g.contains("xxx") || g.contains("adult") || g.contains("эрот") -> "🔞"
+        g.contains("общие") || g.contains("эфир") || g.contains("федерал") || g.contains("россия") || g.contains("базов") || g.contains("обществен") -> "📡"
+        g.contains("uhd") || g.contains("4k") || g.contains("vip") || g.contains("премиум") || g.contains("hd") || g.contains("original") -> "💎"
+        g.contains("развлек") || g.contains("юмор") || g.contains("шоу") || g.contains("хобби") || g.contains("стиль") -> "🎭"
+        g.contains("регион") || g.contains("снг") || g.contains("мир") || g.contains("стран") || g.contains("международ") || g.contains("европ") -> "🌐"
+        g.contains("bcu") || g.contains("vportal") || g.contains("зал") -> "🍿"
+        else -> "📁"
     }
 }
 

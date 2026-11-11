@@ -56,6 +56,8 @@ data class Playlist(
         const val DEFAULT_USER_AGENT = "MinogaTVBox/1.0 (Android)"
         /** Default Web Portal URL for remote playlist & EPG configuration */
         const val DEFAULT_WEB_CONFIG_URL = "https://minogatvbox.duckdns.org"
+        /** Special marker for pre-indexed Live EPG from Minoga TV server (like Media Station X) */
+        const val LIVE_SERVER_EPG = "LIVE_EPG"
         /** Primary default XMLTV EPG source (epg.one) */
         const val DEFAULT_EPG_URL = "http://epg.one/epg2.xml.gz"
         /** Secondary public fallback XMLTV EPG source (direct CDN) */
@@ -78,6 +80,10 @@ data class Playlist(
             var url = raw.trim()
                 .replace("\uFEFF", "")
                 .replace("\u200B", "")
+
+            if (url.equals(LIVE_SERVER_EPG, ignoreCase = true) || url.equals("live://epg", ignoreCase = true)) {
+                return LIVE_SERVER_EPG
+            }
 
             // Handle prefixes like 'it999http://github.com/...'
             if (url.startsWith("it999http://", ignoreCase = true)) {

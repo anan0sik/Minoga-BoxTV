@@ -155,6 +155,7 @@ fun PlayerScreen(
 
     var playerPositionMs by remember { mutableLongStateOf(0L) }
     var playerDurationMs by remember { mutableLongStateOf(0L) }
+    var focusedControlIndex by remember { mutableIntStateOf(2) } // Default: 2 = Play/Pause
 
     BackHandler {
         if (uiState.isCatchupMode) {
@@ -285,14 +286,40 @@ fun PlayerScreen(
         )
 
         val lifecycleObserver = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                AudioRouteRecovery.recoverSystemAudioState(context, forcePhoneSpeaker)
-                activeAudioRouteLabel = AudioRouteRecovery.applyOptimalPreferredDevice(
-                    context = context,
-                    exoPlayer = exoPlayer,
-                    forcePhoneSpeaker = forcePhoneSpeaker,
-                )
-                exoPlayer.volume = 1f
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    val act = context.findPlayerActivity()
+                    val inPip = act != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && act.isInPictureInPictureMode
+                    if (!inPip) {
+                        exoPlayer.stop()
+                    }
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    AudioRouteRecovery.recoverSystemAudioState(context, forcePhoneSpeaker)
+                    activeAudioRouteLabel = AudioRouteRecovery.applyOptimalPreferredDevice(
+                        context = context,
+                        exoPlayer = exoPlayer,
+                        forcePhoneSpeaker = forcePhoneSpeaker,
+                    )
+                    exoPlayer.volume = 1f
+                    if (exoPlayer.playbackState == Player.STATE_IDLE ||
+                        exoPlayer.playbackState == Player.STATE_ENDED ||
+                        exoPlayer.playerError != null ||
+                        !exoPlayer.isPlaying
+                    ) {
+                        val state = currentUiState
+                        val isCatchup = state.isCatchupMode || state.catchupStartMs != null
+                        val streamUrl = if (isCatchup) state.catchupUrl else state.channel?.streamUrl
+                        if (!streamUrl.isNullOrEmpty()) {
+                            lastLoadedStreamUrl = streamUrl
+                            exoPlayer.setMediaItem(MediaItem.fromUri(streamUrl))
+                            exoPlayer.prepare()
+                            exoPlayer.play()
+                        }
+                    }
+                    runCatching { focusRequester.requestFocus() }
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
@@ -481,6 +508,34 @@ fun PlayerScreen(
         }
     }
 
+    val togglePlayPauseAction: () -> Unit = {
+        if (exoPlayer.isPlaying) {
+            exoPlayer.pause()
+            if (!uiState.isCatchupMode && (uiState.isArchiveSupported || uiState.channel?.hasArchive == true)) {
+                viewModel.switchToCatchup()
+            }
+        } else {
+            exoPlayer.play()
+        }
+        viewModel.showOsd()
+    }
+
+    val triggerControlAction: (Int) -> Unit = { idx ->
+        focusedControlIndex = idx.coerceIn(0, 7)
+        viewModel.showOsd()
+        val hasCatchup = uiState.isCatchupMode || uiState.isArchiveSupported || (uiState.channel?.hasArchive == true)
+        when (idx) {
+            0 -> viewModel.previousChannel()
+            1 -> if (hasCatchup) onSeek(false, false)
+            2 -> togglePlayPauseAction()
+            3 -> if (hasCatchup) onSeek(true, false)
+            4 -> viewModel.nextChannel()
+            5 -> viewModel.toggleFavorite()
+            6 -> viewModel.cycleAspectRatio()
+            7 -> onBack()
+        }
+    }
+
     // ─── Auto-focus & direct key registration for D-Pad Remote & Touch Gestures ─
     val screenKeyDispatcher = LocalScreenKeyDispatcher.current
     val handlePlayerKey by rememberUpdatedState { nativeEvent: KeyEvent ->
@@ -503,22 +558,50 @@ fun PlayerScreen(
                         true
                     }
                 }
-                KeyEvent.KEYCODE_DPAD_RIGHT,
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    val hasCatchup = uiState.isCatchupMode || uiState.isArchiveSupported || (uiState.channel?.hasArchive == true)
+                    if (uiState.isOsdVisible) {
+                        focusedControlIndex = (focusedControlIndex + 1) % 8
+                        viewModel.showOsd()
+                        true
+                    } else if (hasCatchup) {
+                        val isRepeat = nativeEvent.repeatCount > 0
+                        onSeek(true, isRepeat)
+                        true
+                    } else {
+                        focusedControlIndex = 2
+                        viewModel.showOsd()
+                        true
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    val hasCatchup = uiState.isCatchupMode || uiState.isArchiveSupported || (uiState.channel?.hasArchive == true)
+                    if (uiState.isOsdVisible) {
+                        focusedControlIndex = if (focusedControlIndex - 1 < 0) 7 else focusedControlIndex - 1
+                        viewModel.showOsd()
+                        true
+                    } else if (hasCatchup) {
+                        val isRepeat = nativeEvent.repeatCount > 0
+                        onSeek(false, isRepeat)
+                        true
+                    } else {
+                        focusedControlIndex = 2
+                        viewModel.showOsd()
+                        true
+                    }
+                }
                 KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
                 KeyEvent.KEYCODE_MEDIA_STEP_FORWARD -> {
                     val hasCatchup = uiState.isCatchupMode || uiState.isArchiveSupported || (uiState.channel?.hasArchive == true)
-
                     if (hasCatchup) {
                         val isRepeat = nativeEvent.repeatCount > 0
                         onSeek(true, isRepeat)
                         true
                     } else false
                 }
-                KeyEvent.KEYCODE_DPAD_LEFT,
                 KeyEvent.KEYCODE_MEDIA_REWIND,
                 KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD -> {
                     val hasCatchup = uiState.isCatchupMode || uiState.isArchiveSupported || (uiState.channel?.hasArchive == true)
-
                     if (hasCatchup) {
                         val isRepeat = nativeEvent.repeatCount > 0
                         onSeek(false, isRepeat)
@@ -527,25 +610,27 @@ fun PlayerScreen(
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER -> {
-                    viewModel.toggleOsd()
+                    if (uiState.isOsdVisible) {
+                        triggerControlAction(focusedControlIndex)
+                    } else {
+                        focusedControlIndex = 2
+                        viewModel.showOsd()
+                    }
+                    true
+                }
+                KeyEvent.KEYCODE_PROG_RED -> {
+                    focusedControlIndex = 5
+                    viewModel.toggleFavorite()
                     true
                 }
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
                 KeyEvent.KEYCODE_MEDIA_PLAY,
                 KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                    if (exoPlayer.isPlaying) {
-                        exoPlayer.pause()
-                        // When pausing live TV with catch-up support, switch to timeshift
-                        if (!uiState.isCatchupMode && (uiState.isArchiveSupported || uiState.channel?.hasArchive == true)) {
-                            viewModel.switchToCatchup()
-                        }
-                    } else {
-                        exoPlayer.play()
-                    }
-                    viewModel.showOsd()
+                    togglePlayPauseAction()
                     true
                 }
-                KeyEvent.KEYCODE_BACK -> {
+                KeyEvent.KEYCODE_BACK,
+                KeyEvent.KEYCODE_ESCAPE -> {
                     // If in catch-up mode, go back to live first
                     if (uiState.isCatchupMode) {
                         pendingSeekTargetTimeMs = null
@@ -561,13 +646,24 @@ fun PlayerScreen(
                 }
                 else -> false
             }
+        } else if (nativeEvent.action == KeyEvent.ACTION_UP &&
+            (nativeEvent.keyCode == KeyEvent.KEYCODE_BACK || nativeEvent.keyCode == KeyEvent.KEYCODE_ESCAPE)
+        ) {
+            true
         } else false
     }
 
-    DisposableEffect(screenKeyDispatcher) {
+    DisposableEffect(screenKeyDispatcher, lifecycleOwner) {
         val handler: (KeyEvent) -> Boolean = { event -> handlePlayerKey(event) }
         screenKeyDispatcher?.activeHandler = handler
+        val resumeKeyObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                screenKeyDispatcher?.activeHandler = handler
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(resumeKeyObserver)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(resumeKeyObserver)
             if (screenKeyDispatcher?.activeHandler === handler) {
                 screenKeyDispatcher.activeHandler = null
             }
@@ -1049,32 +1145,101 @@ fun PlayerScreen(
                         }
                     }
 
-                    // ── Bottom Remote Control Guide Bar (tappable on touch screens) ──
-                    val togglePlayPause = {
-                        if (exoPlayer.isPlaying) {
-                            exoPlayer.pause()
-                            if (!uiState.isCatchupMode && (uiState.isArchiveSupported || uiState.channel?.hasArchive == true)) {
-                                viewModel.switchToCatchup()
+                    // ── Interactive Player Controls Row (D-Pad ◄ ► + Touch) ──────────
+                    val hasCatchupControls = uiState.isCatchupMode || uiState.isArchiveSupported || (uiState.channel?.hasArchive == true)
+                    val controlButtons = listOf(
+                        "⏮ Пред.",
+                        "⏪ -${seekStepSeconds}с",
+                        if (uiState.isPlaying) "⏸ Пауза" else "▶ Пуск",
+                        "⏩ +${seekStepSeconds}с",
+                        "⏭ След.",
+                        if (uiState.isFavorite) "★ В избранном" else "☆ В избранное",
+                        "📐 ${uiState.aspectRatio.label}",
+                        "✕ Закрыть",
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = if (isCompact) 10.dp else 28.dp,
+                                vertical = if (isCompact) 4.dp else 6.dp,
+                            ),
+                        horizontalArrangement = Arrangement.spacedBy(if (isCompact) 5.dp else 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        controlButtons.forEachIndexed { idx, label ->
+                            val isBtnFocused = focusedControlIndex == idx
+                            val isFavActive = idx == 5 && uiState.isFavorite
+                            val isSeekDisabled = (idx == 1 || idx == 3) && !hasCatchupControls
+                            val bgBrush = when {
+                                isFavActive && isBtnFocused -> Brush.verticalGradient(
+                                    listOf(Color(0xFFFBBF24), Color(0xFFD97706))
+                                )
+                                isFavActive -> Brush.verticalGradient(
+                                    listOf(Color(0x66F59E0B), Color(0x4DD97706))
+                                )
+                                isBtnFocused -> Brush.verticalGradient(
+                                    listOf(Color(0x5900E5FF), Color(0x3300E5FF))
+                                )
+                                else -> Brush.verticalGradient(
+                                    listOf(Color(0xCC131826), Color(0xCC0D111A))
+                                )
                             }
-                        } else {
-                            exoPlayer.play()
+                            val borderColor = when {
+                                isFavActive -> Color(0xFFFBBF24)
+                                isBtnFocused -> ChannelDesignTokens.NeonCyan
+                                else -> Color(0x33FFFFFF)
+                            }
+                            val textColor = when {
+                                isFavActive && isBtnFocused -> Color(0xFF090D16)
+                                isFavActive -> Color(0xFFFDE68A)
+                                isBtnFocused -> Color.White
+                                isSeekDisabled -> Color(0x6694A3B8)
+                                else -> Color(0xFFE2E8F0)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(if (idx == 5 || idx == 6) 1.25f else 1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(bgBrush)
+                                    .border(
+                                        width = if (isBtnFocused || isFavActive) 2.dp else 1.dp,
+                                        color = borderColor,
+                                        shape = RoundedCornerShape(10.dp),
+                                    )
+                                    .clickable { triggerControlAction(idx) }
+                                    .padding(
+                                        horizontal = if (isCompact) 6.dp else 10.dp,
+                                        vertical = if (isCompact) 6.dp else 8.dp,
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = textColor,
+                                    fontSize = if (isCompact) 10.5.sp else 12.5.sp,
+                                    fontWeight = if (isBtnFocused || isFavActive) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
-                        viewModel.showOsd()
                     }
+
+                    // ── Bottom Remote Control Guide Bar (tappable on touch screens) ──
+                    val togglePlayPause = togglePlayPauseAction
                     RemoteControlHintBar(
                         hints = if (uiState.isCatchupMode) {
                             listOf(
-                                RemoteHint(keyLabel = "◀", action = "-${seekStepSeconds}с") {
-                                    onSeek(false, false)
-                                },
-                                RemoteHint(keyLabel = "▶", action = "+${seekStepSeconds}с") {
+                                RemoteHint(keyLabel = "◄►", action = "Кнопки / Перемотка") {
                                     onSeek(true, false)
                                 },
-                                RemoteHint(keyLabel = "OK", action = "Инфо / OSD") {
-                                    viewModel.toggleOsd()
+                                RemoteHint(keyLabel = "OK", action = "Выбор / Пауза") {
+                                    triggerControlAction(focusedControlIndex)
                                 },
-                                RemoteHint(keyLabel = "⏯", action = "Пауза / Старт") {
-                                    togglePlayPause()
+                                RemoteHint(keyLabel = "🔴", action = "Избранное", keyColor = Color(0xFFFF5252)) {
+                                    viewModel.toggleFavorite()
                                 },
                                 RemoteHint(keyLabel = "Назад", action = "Прямой эфир") {
                                     pendingSeekTargetTimeMs = null
@@ -1086,20 +1251,16 @@ fun PlayerScreen(
                             )
                         } else {
                             listOfNotNull(
-                                RemoteHint(keyLabel = "▲", action = "Пред. канал") {
-                                    viewModel.previousChannel()
-                                },
-                                RemoteHint(keyLabel = "▼", action = "След. канал") {
+                                RemoteHint(keyLabel = "▲▼", action = "Канал") {
                                     viewModel.nextChannel()
                                 },
-                                RemoteHint(keyLabel = "OK", action = "Инфо / OSD") {
-                                    viewModel.toggleOsd()
+                                RemoteHint(keyLabel = "◄►", action = "Кнопки плеера"),
+                                RemoteHint(keyLabel = "OK", action = "Выбор / Пауза") {
+                                    triggerControlAction(focusedControlIndex)
                                 },
-                                if (uiState.isArchiveSupported || uiState.channel?.hasArchive == true) {
-                                    RemoteHint(keyLabel = "⏯", action = "Архив / Пауза") {
-                                        togglePlayPause()
-                                    }
-                                } else null,
+                                RemoteHint(keyLabel = "🔴", action = "Избранное", keyColor = Color(0xFFFF5252)) {
+                                    viewModel.toggleFavorite()
+                                },
                                 RemoteHint(keyLabel = "Назад", action = "Список каналов") {
                                     onBack()
                                 },

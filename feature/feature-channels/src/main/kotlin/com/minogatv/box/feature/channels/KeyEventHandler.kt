@@ -367,6 +367,11 @@ class KeyEventHandler(
         focusedChannelId: Long?,
         state: ChannelListUiState,
     ): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE) {
+            longPressDetector.reset()
+            return true
+        }
+
         if (state.isContextMenuOpen) {
             return false
         }

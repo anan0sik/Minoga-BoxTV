@@ -23,8 +23,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
@@ -72,6 +74,7 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
         AppUpdateManager.ensureLocalVersionLoaded(this)
         AppUpdateManager.checkForUpdates(this)
+        WakeUpAutoStartService.syncServiceState(this)
 
         if (prefs.getBoolean("accepted_terms", false)) {
             lifecycleScope.launch {
@@ -81,12 +84,7 @@ class MainActivity : ComponentActivity() {
 
         val autoPlayLast = prefs.getBoolean("auto_play_last_channel", false)
         val lastChannelId = prefs.getLong("last_watched_channel_id", 0L)
-
-        val startDest = if (autoPlayLast && lastChannelId > 0L) {
-            "player/$lastChannelId"
-        } else {
-            Routes.CHANNEL_LIST
-        }
+        val initialAutoPlayChannelId = if (autoPlayLast && lastChannelId > 0L) lastChannelId else 0L
 
         setContent {
             var acceptedTerms by remember {
@@ -138,7 +136,7 @@ class MainActivity : ComponentActivity() {
                             )
                         } else {
                             MinogaNavHost(
-                                startDestination = startDest,
+                                initialAutoPlayChannelId = initialAutoPlayChannelId,
                                 onPlayerStateChanged = { active ->
                                     isPlayerActive = active
                                     if (active) {
@@ -159,6 +157,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         com.minogatv.box.feature.player.AudioRouteRecovery.recoverSystemAudioState(this)
         AppUpdateManager.onResumeCheckPendingInstall(this)
+        WakeUpAutoStartService.syncServiceState(this)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -170,7 +169,16 @@ class MainActivity : ComponentActivity() {
         if (screenKeyDispatcher.dispatch(event)) {
             return true
         }
-        return super.dispatchKeyEvent(event)
+        val handled = super.dispatchKeyEvent(event)
+        if (!handled && (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_ESCAPE)) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                return true
+            } else if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
+                onBackPressedDispatcher.onBackPressed()
+                return true
+            }
+        }
+        return handled
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -193,6 +201,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
+        // Do not auto-enter PiP on Android TV boxes/sticks (e.g. Xiaomi Stick), because PiP holds the
+        // hardware video decoder in a background floating window and breaks re-opening from the TV launcher.
+        if (com.minogatv.box.feature.player.AudioRouteRecovery.isTvDevice(this)) {
+            return
+        }
         val prefs = getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
         val pipEnabled = prefs.getBoolean("pip_enabled", true)
         if (pipEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isPlayerActive) {
@@ -214,7 +227,7 @@ private object Routes {
 
 @Composable
 private fun MinogaNavHost(
-    startDestination: String = Routes.CHANNEL_LIST,
+    initialAutoPlayChannelId: Long = 0L,
     onPlayerStateChanged: (Boolean) -> Unit = {},
 ) {
     val navController = rememberNavController()
@@ -222,9 +235,25 @@ private fun MinogaNavHost(
     val route = currentEntry?.destination?.route.orEmpty()
     onPlayerStateChanged(route.startsWith("player/") || route == Routes.VOD_LIBRARY)
 
+    var didAutoPlayOnLaunch by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(initialAutoPlayChannelId) {
+        if (!didAutoPlayOnLaunch && initialAutoPlayChannelId > 0L) {
+            didAutoPlayOnLaunch = true
+            navController.navigate("player/$initialAutoPlayChannelId")
+        }
+    }
+
+    val safePopToChannelList: () -> Unit = {
+        if (!navController.popBackStack()) {
+            navController.navigate(Routes.CHANNEL_LIST) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
-        startDestination = startDestination,
+        startDestination = Routes.CHANNEL_LIST,
     ) {
 
         // ── Главный экран: список каналов ─────────────────────────────────
@@ -250,7 +279,7 @@ private fun MinogaNavHost(
         // ── Медиатека (каталог фильмов и сериалов) ────────────────────────
         composable(Routes.VOD_LIBRARY) {
             VodLibraryScreen(
-                onBackClick = { navController.popBackStack() },
+                onBackClick = safePopToChannelList,
                 onOpenSettingsClick = { navController.navigate(Routes.SETTINGS) },
             )
         }
@@ -258,7 +287,7 @@ private fun MinogaNavHost(
         // ── Настройки ─────────────────────────────────────────────────────
         composable(Routes.SETTINGS) {
             SettingsScreen(
-                onBack = { navController.popBackStack() },
+                onBack = safePopToChannelList,
                 onOpenVodLibrary = { navController.navigate(Routes.VOD_LIBRARY) },
             )
         }
@@ -280,7 +309,7 @@ private fun MinogaNavHost(
             PlayerScreen(
                 channelId = channelId,
                 catchupStartMs = catchupStartMs,
-                onBack = { navController.popBackStack() },
+                onBack = safePopToChannelList,
             )
         }
     }

@@ -161,6 +161,9 @@ public class IptvMockServer {
         server.setExecutor(Executors.newCachedThreadPool());
         server.start();
 
+        // Pre-warm default EPG dataset in background so it is immediately ready for Smart TV & Android clients
+        getOrStartEpgDataset("http://epg.one/epg2.xml.gz");
+
         System.out.println("==================================================================");
         System.out.println("  Minoga TV Box - Web Pairing & IPTV Server STARTED!");
         System.out.println("==================================================================");
@@ -411,38 +414,15 @@ public class IptvMockServer {
             }
             String name = extractJsonString(body, "name", "Minoga TV").trim();
             String playlistUrl = extractJsonString(body, "playlistUrl", "").trim();
-            String epgUrl = extractJsonString(body, "epgUrl", "http://epg.one/epg2.xml.gz").trim();
+            String epgUrl = extractJsonString(body, "epgUrl", "").trim();
             String vodUrl = extractJsonString(body, "vodUrl", "").trim();
             String vodLogin = extractJsonString(body, "vodLogin", "").trim();
             String vodPassword = extractJsonString(body, "vodPassword", "").trim();
             String vodKey = extractJsonString(body, "vodKey", "").trim();
 
-            if (vodUrl.toLowerCase(Locale.ROOT).contains("portal::")) {
-                Matcher pm = TvVodApiHandler.PORTAL_LINK_PATTERN.matcher(vodUrl);
-                if (pm.find()) {
-                    String bracket = pm.group(1) != null ? pm.group(1) : "";
-                    vodUrl = pm.group(2).trim();
-                    for (String part : bracket.split(";")) {
-                        if (part.toLowerCase(Locale.ROOT).startsWith("key:")) {
-                            String ek = part.substring(4).trim();
-                            if (!ek.isEmpty()) vodKey = ek;
-                        }
-                    }
-                }
-            } else if (vodKey.toLowerCase(Locale.ROOT).contains("portal::")) {
-                Matcher pm = TvVodApiHandler.PORTAL_LINK_PATTERN.matcher(vodKey);
-                if (pm.find()) {
-                    String bracket = pm.group(1) != null ? pm.group(1) : "";
-                    String eu = pm.group(2).trim();
-                    if (!eu.isEmpty()) vodUrl = eu;
-                    for (String part : bracket.split(";")) {
-                        if (part.toLowerCase(Locale.ROOT).startsWith("key:")) {
-                            String ek = part.substring(4).trim();
-                            if (!ek.isEmpty()) vodKey = ek;
-                        }
-                    }
-                }
-            }
+            String[] normVod = TvVodApiHandler.normalizeVodPortalUrlAndKey(vodUrl, vodKey);
+            vodUrl = normVod[0];
+            vodKey = normVod[1];
 
             if (code.length() != 4) {
                 sendResponse(exchange, 400, "application/json; charset=utf-8",
@@ -674,9 +654,9 @@ public class IptvMockServer {
             }
             String json = "{\n"
                     + "  \"name\": \"Minoga TV Box\",\n"
-                    + "  \"version\": \"1.1.6\",\n"
-                    + "  \"parameter\": \"content:https://minogatvbox.duckdns.org/msx/content.json?v=116\",\n"
-                    + "  \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=116\"\n"
+                    + "  \"version\": \"1.1.8\",\n"
+                    + "  \"parameter\": \"content:https://minogatvbox.duckdns.org/msx/content.json?v=118\",\n"
+                    + "  \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=118\"\n"
                     + "}\n";
             sendResponse(exchange, 200, "application/json; charset=utf-8", json);
         }
@@ -697,7 +677,7 @@ public class IptvMockServer {
             String json = "{\n"
                     + "  \"type\": \"pages\",\n"
                     + "  \"headline\": \"Minoga TV Box\",\n"
-                    + "  \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=116\",\n"
+                    + "  \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=118\",\n"
                     + "  \"template\": {\n"
                     + "    \"type\": \"separate\",\n"
                     + "    \"layout\": \"0,0,4,3\",\n"
@@ -710,7 +690,7 @@ public class IptvMockServer {
                     + "      \"titleFooter\": \"Полноценный веб-интерфейс для LG и Samsung TV\",\n"
                     + "      \"image\": \"https://minogatvbox.duckdns.org/download/icon.png\",\n"
                     + "      \"icon\": \"tv\",\n"
-                    + "      \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=116\"\n"
+                    + "      \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=118\"\n"
                     + "    },\n"
                     + "    {\n"
                     + "      \"title\": \"Привязка плейлиста по коду\",\n"
@@ -799,7 +779,7 @@ public class IptvMockServer {
                         + "      \"image\": \"https://minogatvbox.duckdns.org/download/icon.png\",\n"
                         + "      \"badge\": \"MINOGA TV\",\n"
                         + "      \"badgeColor\": \"msx-cyan\",\n"
-                        + "      \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=116\"\n"
+                        + "      \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=118\"\n"
                         + "    },\n"
                         + "    {\n"
                         + "      \"title\": \"OttPlayer\",\n"
@@ -1118,9 +1098,102 @@ public class IptvMockServer {
 
     static class TvVodApiHandler implements HttpHandler {
         private static final Pattern PORTAL_LINK_PATTERN = Pattern.compile(
-                "^(?:https?://)?portal::(?:\\[([^\\]]*)\\])?\\s*(https?://.+)$", Pattern.CASE_INSENSITIVE);
+                "^(?:[a-z]+:/+)?portal::(?:\\[([^\\]]*)\\])?\\s*(.*)$", Pattern.CASE_INSENSITIVE);
+        private static final Pattern HEX_SUBDOMAIN_URL_PATTERN = Pattern.compile(
+                "^(https?://)([0-9a-f]{8,20})\\.([a-z0-9.-]+\\.[a-z]{2,})(/.*)?$", Pattern.CASE_INSENSITIVE);
         private static final Pattern YEAR_IN_TITLE_PATTERN = Pattern.compile("\\b(19[5-9]\\d|20[0-2]\\d)\\b");
         private static final Pattern JSON_OBJ_ITEM_PATTERN = Pattern.compile("\\{[^{}]*(?:\\{[^{}]*\\}[^{}]*)*\\}");
+
+        public static String cleanMalformedScheme(String url) {
+            if (url == null) return "";
+            String s = url.replace("\\/", "/").replace("\\\\", "\\").trim();
+            if (s.isEmpty()) return "";
+            while (s.matches("(?i)^[a-z]{3,7}:/+[a-z]{3,7}:/+.*")) {
+                s = s.replaceFirst("(?i)^[a-z]{3,7}:/+", "");
+            }
+            if (s.matches("(?i)^h+t+p+s:/+.*")) {
+                s = s.replaceFirst("(?i)^h+t+p+s:/+", "https://");
+            } else if (s.matches("(?i)^h+t+p+:/+.*")) {
+                s = s.replaceFirst("(?i)^h+t+p+:/+", "http://");
+            } else if (!s.startsWith("http://") && !s.startsWith("https://")) {
+                if (s.toLowerCase(Locale.ROOT).contains("/api/v1")) {
+                    s = "http://" + s.replaceFirst("^/+", "");
+                } else {
+                    s = "https://" + s.replaceFirst("^/+", "");
+                }
+            }
+            return s;
+        }
+
+        public static String[] normalizeVodPortalUrlAndKey(String rawUrl, String rawKey) {
+            String u = rawUrl == null ? "" : rawUrl.replace("\\/", "/").replace("\\\\", "\\").trim();
+            String k = rawKey == null ? "" : rawKey.replace("\\/", "/").replace("\\\\", "\\").trim();
+
+            if (u.toLowerCase(Locale.ROOT).contains("portal::")) {
+                Matcher pm = PORTAL_LINK_PATTERN.matcher(u);
+                if (pm.find()) {
+                    String bracket = pm.group(1) != null ? pm.group(1) : "";
+                    u = pm.group(2) != null ? pm.group(2).trim() : "";
+                    for (String part : bracket.split(";")) {
+                        if (part.trim().toLowerCase(Locale.ROOT).startsWith("key:")) {
+                            String extractedKey = part.trim().substring(4).trim();
+                            if (!extractedKey.isEmpty()) k = extractedKey;
+                        }
+                    }
+                }
+            } else if (k.toLowerCase(Locale.ROOT).contains("portal::")) {
+                Matcher pm = PORTAL_LINK_PATTERN.matcher(k);
+                if (pm.find()) {
+                    String bracket = pm.group(1) != null ? pm.group(1) : "";
+                    String extractedUrl = pm.group(2) != null ? pm.group(2).trim() : "";
+                    if (!extractedUrl.isEmpty()) u = extractedUrl;
+                    for (String part : bracket.split(";")) {
+                        if (part.trim().toLowerCase(Locale.ROOT).startsWith("key:")) {
+                            String extractedKey = part.trim().substring(4).trim();
+                            if (!extractedKey.isEmpty()) k = extractedKey;
+                        }
+                    }
+                }
+            }
+
+            if (!u.isEmpty()) {
+                u = cleanMalformedScheme(u);
+                Matcher hm = HEX_SUBDOMAIN_URL_PATTERN.matcher(u);
+                if (hm.find()) {
+                    String subKey = hm.group(2);
+                    if (k.isEmpty() && subKey != null && !subKey.isEmpty()) {
+                        k = subKey;
+                    }
+                }
+            }
+            return new String[]{u, k};
+        }
+
+        private static List<String> buildVPortalCandidates(String urlStr) {
+            java.util.Set<String> set = new java.util.LinkedHashSet<>();
+            String clean = cleanMalformedScheme(urlStr);
+            if (!clean.isEmpty()) {
+                if (clean.startsWith("https://") && clean.toLowerCase(Locale.ROOT).contains("/api/v1")) {
+                    set.add("http://" + clean.substring(8));
+                    set.add(clean);
+                } else if (clean.startsWith("http://")) {
+                    set.add(clean);
+                    set.add("https://" + clean.substring(7));
+                } else {
+                    set.add(clean);
+                }
+                Matcher hm = HEX_SUBDOMAIN_URL_PATTERN.matcher(clean);
+                if (hm.find()) {
+                    String baseDomain = hm.group(3);
+                    String path = hm.group(4) != null && !hm.group(4).isEmpty() ? hm.group(4) : "/api/v1/";
+                    set.add("http://" + baseDomain + path);
+                    set.add("https://" + baseDomain + path);
+                }
+            }
+            set.add("http://bushkanasa.com/api/v1/");
+            set.add("http://zeeronest.com/api/v1/");
+            return new ArrayList<>(set);
+        }
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
@@ -1176,34 +1249,9 @@ public class IptvMockServer {
             int offset = (int) Math.max(0, extractJsonLong(body, "offset",
                     (offsetParam != null && offsetParam.matches("^\\d+$")) ? Long.parseLong(offsetParam) : 0));
 
-            // Parse portal::[key:XXX]http://... if pasted into rawUrl or key.
-            // Note: If a portal::[key:...] string is provided, its embedded key ALWAYS overrides any stale key!
-            if (rawUrl.toLowerCase(Locale.ROOT).contains("portal::")) {
-                Matcher pm = PORTAL_LINK_PATTERN.matcher(rawUrl);
-                if (pm.find()) {
-                    String bracket = pm.group(1) != null ? pm.group(1) : "";
-                    rawUrl = pm.group(2).trim();
-                    for (String part : bracket.split(";")) {
-                        if (part.toLowerCase(Locale.ROOT).startsWith("key:")) {
-                            String extractedKey = part.substring(4).trim();
-                            if (!extractedKey.isEmpty()) key = extractedKey;
-                        }
-                    }
-                }
-            } else if (key.toLowerCase(Locale.ROOT).contains("portal::")) {
-                Matcher pm = PORTAL_LINK_PATTERN.matcher(key);
-                if (pm.find()) {
-                    String bracket = pm.group(1) != null ? pm.group(1) : "";
-                    String extractedUrl = pm.group(2).trim();
-                    if (!extractedUrl.isEmpty()) rawUrl = extractedUrl;
-                    for (String part : bracket.split(";")) {
-                        if (part.toLowerCase(Locale.ROOT).startsWith("key:")) {
-                            String extractedKey = part.substring(4).trim();
-                            if (!extractedKey.isEmpty()) key = extractedKey;
-                        }
-                    }
-                }
-            }
+            String[] normVod = normalizeVodPortalUrlAndKey(rawUrl, key);
+            rawUrl = normVod[0];
+            key = normVod[1];
 
             if (rawUrl.isEmpty() && key.isEmpty()) {
                 sendResponse(exchange, 400, "application/json; charset=utf-8",
@@ -1211,8 +1259,8 @@ public class IptvMockServer {
                 return;
             }
 
-            if (!rawUrl.isEmpty() && !rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) {
-                rawUrl = "https://" + rawUrl;
+            if (rawUrl.isEmpty() && !key.isEmpty()) {
+                rawUrl = "http://bushkanasa.com/api/v1/";
             }
 
             try {
@@ -1516,13 +1564,7 @@ public class IptvMockServer {
         }
 
         private static String tryVPortalCatalog(String urlStr, String key, String category, String genreFilter, String yearFilter, String search, String requestJson, int page, int offset) {
-            List<String> candidates = new ArrayList<>();
-            candidates.add(urlStr);
-            if (urlStr.startsWith("https://")) {
-                candidates.add("http://" + urlStr.substring(8));
-            } else if (urlStr.startsWith("http://")) {
-                candidates.add("https://" + urlStr.substring(7));
-            }
+            List<String> candidates = buildVPortalCandidates(urlStr);
 
             String effectiveReqJson = requestJson;
             if ((effectiveReqJson == null || effectiveReqJson.isEmpty()) && category != null && category.trim().startsWith("{")) {
@@ -1749,6 +1791,33 @@ public class IptvMockServer {
                                     appendVPortalStreamItem(itemsOut, firstItemRef, itemCounter, lObj, lType, lTitle,
                                             subPoster, subYear, subDesc, sc.id, cat.title);
                                 }
+                            }
+                        }
+                    }
+                }
+                // Fallback: if root category drilling still yielded 0 items, fetch Movies (fid=1) and Series (fid=2) directly
+                if (itemCounter[0] == 0) {
+                    int[] defaultFids = new int[]{1, 2};
+                    String[] defaultNames = new String[]{"Фильмы", "Сериалы"};
+                    String[] defaultIds = new String[]{"movies", "series"};
+                    for (int idx = 0; idx < defaultFids.length; idx++) {
+                        String directReq = "{\"cmd\":\"flicks\",\"fid\":" + defaultFids[idx] + ",\"offset\":0,\"limit\":0}";
+                        String directPayload = buildVPortalPayload(key, directReq, "");
+                        String directResp = httpRequestText(portalUrl, "POST", directPayload, headers, 6000);
+                        if (directResp == null || !directResp.trim().startsWith("{")) continue;
+                        long dCount = extractJsonLong(directResp, "count", 0);
+                        if (dCount > 0) summedTotal += dCount;
+                        List<String> dObjs = extractItemsArrayObjects(directResp);
+                        int addedDirect = 0;
+                        for (String dObj : dObjs) {
+                            if (itemCounter[0] >= 240 || addedDirect >= 80) break;
+                            String dType = extractJsonString(dObj, "type", "");
+                            String dTitle = extractJsonString(dObj, "title", "");
+                            if ("next".equalsIgnoreCase(dType) || dTitle.isEmpty()) continue;
+                            if ("stream".equalsIgnoreCase(dType) || "multistream".equalsIgnoreCase(dType)) {
+                                appendVPortalStreamItem(itemsOut, firstItemRef, itemCounter, dObj, dType, dTitle,
+                                        parentPoster, parentYear, parentDesc, defaultIds[idx], defaultNames[idx]);
+                                addedDirect++;
                             }
                         }
                     }
@@ -2163,39 +2232,79 @@ public class IptvMockServer {
             if (!key.isEmpty() && !requestJson.isEmpty() && requestJson.startsWith("{") && requestJson.endsWith("}")) {
                 String payload = buildVPortalPayload(key, requestJson, "");
                 Map<String, String> vHeaders = buildVPortalHeaders();
-                String resp = httpRequestText(rawUrl, "POST", payload, vHeaders, 7000);
-                if (resp != null && resp.trim().startsWith("{")) {
-                    String directUrl = extractJsonString(resp, "url", "");
-                    List<String> subItems = extractItemsArrayObjects(resp);
-                    StringBuilder epsOut = new StringBuilder("[");
-                    boolean firstEp = true;
-                    String firstEpUrl = "";
-                    int epIdx = 0;
-                    for (String sub : subItems) {
-                        String sTitle = firstNonEmpty(extractJsonString(sub, "title", ""), "Серия " + (epIdx + 1));
-                        String sUrl = extractJsonString(sub, "url", "");
-                        String sReq = extractJsonObject(sub, "request");
-                        if (sUrl.isEmpty() && !sReq.isEmpty() && epIdx == 0) {
-                            String r2 = httpRequestText(rawUrl, "POST", buildVPortalPayload(key, sReq, ""), vHeaders, 5000);
-                            if (r2 != null) sUrl = extractJsonString(r2, "url", "");
+                for (String candidateUrl : buildVPortalCandidates(rawUrl)) {
+                    String resp = httpRequestText(candidateUrl, "POST", payload, vHeaders, 7000);
+                    if (resp != null && resp.trim().startsWith("{")) {
+                        String directUrl = extractJsonString(resp, "url", "");
+                        List<String> subItems = extractItemsArrayObjects(resp);
+                        StringBuilder epsOut = new StringBuilder("[");
+                        boolean firstEp = true;
+                        String firstEpUrl = "";
+                        int epIdx = 0;
+                        int seasonProbeCount = 0;
+                        for (String sub : subItems) {
+                            String sTitle = firstNonEmpty(extractJsonString(sub, "title", ""), "Серия " + (epIdx + 1));
+                            String sUrl = extractJsonString(sub, "url", "");
+                            String sReq = extractJsonObject(sub, "request");
+                            if (sUrl.isEmpty() && !sReq.isEmpty() && (epIdx == 0 || seasonProbeCount > 0) && seasonProbeCount < 8) {
+                                String r2 = httpRequestText(candidateUrl, "POST", buildVPortalPayload(key, sReq, ""), vHeaders, 5000);
+                                if (r2 != null && r2.trim().startsWith("{")) {
+                                    String r2Url = extractJsonString(r2, "url", "");
+                                    if (!r2Url.isEmpty()) {
+                                        sUrl = r2Url;
+                                    } else {
+                                        List<String> nestedItems = extractItemsArrayObjects(r2);
+                                        if (!nestedItems.isEmpty()) {
+                                            seasonProbeCount++;
+                                            int nestedIdx = 0;
+                                            for (String nSub : nestedItems) {
+                                                nestedIdx++;
+                                                String nTitle = firstNonEmpty(extractJsonString(nSub, "title", ""), "Серия " + nestedIdx);
+                                                String fullTitle = subItems.size() > 1 ? (sTitle + " • " + nTitle) : nTitle;
+                                                String nUrl = extractJsonString(nSub, "url", "");
+                                                String nReq = extractJsonObject(nSub, "request");
+                                                if (nUrl.isEmpty() && !nReq.isEmpty() && epIdx == 0) {
+                                                    String r3 = httpRequestText(candidateUrl, "POST", buildVPortalPayload(key, nReq, ""), vHeaders, 5000);
+                                                    if (r3 != null) nUrl = extractJsonString(r3, "url", "");
+                                                }
+                                                if (!nUrl.isEmpty() || !nReq.isEmpty()) {
+                                                    epIdx++;
+                                                    if (firstEpUrl.isEmpty() && !nUrl.isEmpty()) firstEpUrl = nUrl;
+                                                    if (!firstEp) epsOut.append(',');
+                                                    firstEp = false;
+                                                    epsOut.append("{\"id\":\"ep_").append(epIdx).append("\",")
+                                                            .append("\"title\":\"").append(escapeJson(fullTitle)).append("\",")
+                                                            .append("\"season\":").append(seasonProbeCount).append(",")
+                                                            .append("\"episode\":").append(nestedIdx).append(",")
+                                                            .append("\"streamUrl\":\"").append(escapeJson(nUrl)).append("\",")
+                                                            .append("\"requestJson\":\"").append(escapeJson(nReq)).append("\"}");
+                                                }
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                            if (!sUrl.isEmpty() || !sReq.isEmpty()) {
+                                epIdx++;
+                                if (firstEpUrl.isEmpty() && !sUrl.isEmpty()) firstEpUrl = sUrl;
+                                if (!firstEp) epsOut.append(',');
+                                firstEp = false;
+                                epsOut.append("{\"id\":\"ep_").append(epIdx).append("\",")
+                                        .append("\"title\":\"").append(escapeJson(sTitle)).append("\",")
+                                        .append("\"season\":1,")
+                                        .append("\"episode\":").append(epIdx).append(",")
+                                        .append("\"streamUrl\":\"").append(escapeJson(sUrl)).append("\",")
+                                        .append("\"requestJson\":\"").append(escapeJson(sReq)).append("\"}");
+                            }
                         }
-                        if (!sUrl.isEmpty() || !sReq.isEmpty()) {
-                            epIdx++;
-                            if (firstEpUrl.isEmpty() && !sUrl.isEmpty()) firstEpUrl = sUrl;
-                            if (!firstEp) epsOut.append(',');
-                            firstEp = false;
-                            epsOut.append("{\"id\":\"ep_").append(epIdx).append("\",")
-                                    .append("\"title\":\"").append(escapeJson(sTitle)).append("\",")
-                                    .append("\"streamUrl\":\"").append(escapeJson(sUrl)).append("\",")
-                                    .append("\"requestJson\":\"").append(escapeJson(sReq)).append("\"}");
+                        epsOut.append(']');
+                        String finalUrl = !directUrl.isEmpty() ? directUrl : firstEpUrl;
+                        if (!finalUrl.isEmpty() || epIdx > 0) {
+                            return "{\"ok\":true,\"status\":\"OK\",\"url\":\"" + escapeJson(finalUrl)
+                                    + "\",\"streamUrl\":\"" + escapeJson(finalUrl)
+                                    + "\",\"episodes\":" + epsOut + "}";
                         }
-                    }
-                    epsOut.append(']');
-                    String finalUrl = !directUrl.isEmpty() ? directUrl : firstEpUrl;
-                    if (!finalUrl.isEmpty() || epIdx > 0) {
-                        return "{\"ok\":true,\"status\":\"OK\",\"url\":\"" + escapeJson(finalUrl)
-                                + "\",\"streamUrl\":\"" + escapeJson(finalUrl)
-                                + "\",\"episodes\":" + epsOut + "}";
                     }
                 }
             }
@@ -2648,7 +2757,12 @@ public class IptvMockServer {
                 return;
             }
             String body = readBody(exchange);
+            URI reqUri = exchange.getRequestURI();
             String epgUrl = extractJsonString(body, "url", "http://epg.one/epg2.xml.gz");
+            boolean fullSchedule = "1".equals(getQueryParam(reqUri, "full"))
+                    || "true".equalsIgnoreCase(getQueryParam(reqUri, "full"))
+                    || "true".equalsIgnoreCase(extractJsonString(body, "full", ""))
+                    || body.contains("\"full\":true") || body.contains("\"full\": true");
             EpgDataset ds = getOrStartEpgDataset(epgUrl);
             if (!"READY".equals(ds.status)) {
                 sendResponse(exchange, 200, "application/json; charset=utf-8",
@@ -2657,15 +2771,15 @@ public class IptvMockServer {
             }
 
             long nowMs = System.currentTimeMillis();
-            StringBuilder out = new StringBuilder(16384);
+            StringBuilder out = new StringBuilder(fullSchedule ? 65536 : 16384);
             out.append("{\"status\":\"READY\",\"live\":{");
             boolean first = true;
 
             Matcher m = CH_OBJ_PATTERN.matcher(body);
             while (m.find()) {
                 String idStr = m.group(1);
-                String tvgId = m.group(2).replace("\\\"", "\"").replace("\\\\", "\\");
-                String name = m.group(3).replace("\\\"", "\"").replace("\\\\", "\\");
+                String tvgId = m.group(2).replace("\\\"", "\"").replace("\\/", "/").replace("\\\\", "\\");
+                String name = m.group(3).replace("\\\"", "\"").replace("\\/", "/").replace("\\\\", "\\");
 
                 List<EpgProgramItem> list = findChannelPrograms(ds, tvgId, name);
                 String iconUrl = findChannelIcon(ds, tvgId, name);
@@ -2686,7 +2800,7 @@ public class IptvMockServer {
                         break;
                     }
                 }
-                if (current != null || next != null || !iconUrl.isEmpty()) {
+                if (current != null || next != null || !iconUrl.isEmpty() || (fullSchedule && !list.isEmpty())) {
                     if (!first) out.append(',');
                     first = false;
                     out.append('"').append(idStr).append("\":{");
@@ -2707,6 +2821,29 @@ public class IptvMockServer {
                     if (!iconUrl.isEmpty()) {
                         if (hasField) out.append(',');
                         out.append("\"ic\":\"").append(escapeJson(iconUrl)).append('"');
+                        hasField = true;
+                    }
+                    if (fullSchedule && !list.isEmpty()) {
+                        if (hasField) out.append(',');
+                        out.append("\"p\":[");
+                        boolean firstProg = true;
+                        long minMs = nowMs - 24 * 3600_000L;
+                        long maxMs = nowMs + 36 * 3600_000L;
+                        for (int i = 0; i < list.size(); i++) {
+                            EpgProgramItem item = list.get(i);
+                            if (item.endMs <= minMs || item.startMs >= maxMs) continue;
+                            if (!firstProg) out.append(',');
+                            firstProg = false;
+                            out.append("{\"s\":").append(item.startMs)
+                                    .append(",\"e\":").append(item.endMs)
+                                    .append(",\"t\":\"").append(escapeJson(item.title)).append('"');
+                            if (item.desc != null && !item.desc.isEmpty()) {
+                                String d = item.desc.length() > 260 ? item.desc.substring(0, 260) + "…" : item.desc;
+                                out.append(",\"d\":\"").append(escapeJson(d)).append('"');
+                            }
+                            out.append('}');
+                        }
+                        out.append(']');
                     }
                     out.append('}');
                 }
@@ -2802,6 +2939,7 @@ public class IptvMockServer {
                     .replace("\\r", "")
                     .replace("\\t", " ")
                     .replace("\\\"", "\"")
+                    .replace("\\/", "/")
                     .replace("\\\\", "\\")
                     .trim();
         }
@@ -2963,6 +3101,7 @@ public class IptvMockServer {
                 + "\"category\":\"" + escapeJson(it.category) + "\","
                 + "\"rating\":" + it.rating + ","
                 + "\"text\":\"" + escapeJson(it.text) + "\","
+                + "\"message\":\"" + escapeJson(it.text) + "\","
                 + "\"status\":\"" + escapeJson(it.status) + "\","
                 + "\"replyText\":\"" + escapeJson(it.replyText) + "\","
                 + "\"createdAt\":" + it.createdAt + ","
@@ -3091,9 +3230,9 @@ public class IptvMockServer {
             List<Long> timestamps = FEEDBACK_RATE_LIMIT.computeIfAbsent(remoteIp, k -> new ArrayList<>());
             synchronized (timestamps) {
                 timestamps.removeIf(ts -> (now - ts) > 3_600_000L);
-                if (timestamps.size() >= 8) {
+                if (timestamps.size() >= 30) {
                     sendResponse(exchange, 429, "application/json; charset=utf-8",
-                            "{\"error\":\"Слишком много отправок. Пожалуйста, подождите немного.\"}");
+                            "{\"ok\":false,\"error\":\"Слишком много отправок. Пожалуйста, подождите немного.\",\"message\":\"Слишком много отправок. Пожалуйста, подождите немного.\"}");
                     return;
                 }
                 timestamps.add(now);
@@ -3103,7 +3242,7 @@ public class IptvMockServer {
             // Honeypot check against automated bots
             String honeypot = extractJsonString(body, "website", "");
             if (!honeypot.isEmpty()) {
-                sendResponse(exchange, 200, "application/json; charset=utf-8", "{\"status\":\"OK\"}");
+                sendResponse(exchange, 200, "application/json; charset=utf-8", "{\"ok\":true,\"status\":\"OK\"}");
                 return;
             }
 
@@ -3111,11 +3250,14 @@ public class IptvMockServer {
             if (clientId.isEmpty()) {
                 clientId = "cl_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
             }
-            String authorName = extractJsonString(body, "authorName", "Пользователь");
+            String authorName = extractJsonString(body, "authorName", "");
+            if (authorName.isEmpty()) authorName = extractJsonString(body, "author", "");
             if (authorName.isEmpty()) authorName = "Пользователь";
             if (authorName.length() > 45) authorName = authorName.substring(0, 45);
 
-            String deviceType = extractJsonString(body, "deviceType", "Android TV");
+            String deviceType = extractJsonString(body, "deviceType", "");
+            if (deviceType.isEmpty()) deviceType = extractJsonString(body, "device", "");
+            if (deviceType.isEmpty()) deviceType = "Smart TV";
             if (deviceType.length() > 40) deviceType = deviceType.substring(0, 40);
 
             String category = extractJsonString(body, "category", "REVIEW").toUpperCase(Locale.ROOT);
@@ -3125,6 +3267,7 @@ public class IptvMockServer {
 
             int rating = (int) Math.max(1, Math.min(5, extractJsonLong(body, "rating", 5)));
             String text = extractJsonString(body, "text", "");
+            if (text.isEmpty()) text = extractJsonString(body, "message", "");
             if (text.length() > 1500) text = text.substring(0, 1500);
             if (text.isEmpty()) {
                 text = rating >= 4 ? "Оценка программы: " + rating + " ★" : "Без комментария (" + rating + " ★)";
@@ -3155,7 +3298,9 @@ public class IptvMockServer {
             }
 
             String resp = "{\n"
+                    + "  \"ok\": true,\n"
                     + "  \"status\": \"OK\",\n"
+                    + "  \"message\": \"✓ Спасибо! Ваша оценка и сообщение отправлены разработчику.\",\n"
                     + "  \"clientId\": \"" + escapeJson(clientId) + "\",\n"
                     + "  \"item\": " + serializePublicFeedbackItem(item) + "\n"
                     + "}";

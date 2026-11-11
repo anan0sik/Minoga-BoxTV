@@ -1039,15 +1039,31 @@
       font-family: Consolas, monospace;
     }
 
-    .text-input {
+    .text-input, .input-field {
       width: 100%;
       background: #07090E;
-      border: 1.5px solid rgba(0, 229, 255, 0.35);
-      border-radius: 0.6rem;
-      padding: 0.6rem 0.8rem;
-      color: #fff;
-      font-size: 0.92rem;
+      border: 2px solid rgba(0, 229, 255, 0.42);
+      border-radius: 0.65rem;
+      padding: 0.72rem 0.95rem;
+      color: #FFFFFF;
+      font-size: 1.04rem;
+      font-weight: 600;
       outline: none;
+      box-sizing: border-box;
+      transition: all 0.14s ease;
+    }
+
+    .text-input::placeholder, .input-field::placeholder {
+      color: #94A3B8;
+      font-weight: 500;
+    }
+
+    .text-input.focused, .text-input:focus, .input-field.focused, .input-field:focus {
+      background: #0D1626;
+      border-color: var(--neon-cyan);
+      color: #FFFFFF;
+      outline: 2.5px solid var(--neon-cyan);
+      box-shadow: 0 0 18px rgba(0, 229, 255, 0.65);
     }
 
     .hidden {
@@ -1837,25 +1853,33 @@
 
         <div class="settings-sec-title">⭐ ОЦЕНКА ПРОГРАММЫ, ОТЗЫВЫ И ВОПРОСЫ РАЗРАБОТЧИКУ</div>
         <div class="settings-card">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.55rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
             <div>
-              <div style="font-weight: 800; font-size: 0.98rem; color: #fff;">Как вам программа Minoga TV Box?</div>
-              <div style="color: var(--text-secondary); font-size: 0.8rem;">Оцените звёздами или задайте вопрос разработчику — ответ придёт прямо сюда!</div>
+              <div style="font-weight: 800; font-size: 1.02rem; color: #fff;">Как вам программа Minoga TV Box?</div>
+              <div style="color: var(--text-secondary); font-size: 0.84rem;">Оцените звёздами или задайте вопрос разработчику (нажмите OK на поле для экранной клавиатуры) — ответ придёт прямо сюда!</div>
             </div>
-            <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
-              <button id="tv-rate-5" class="btn-dark" data-settings-nav="1" onclick="sendQuickTvRating(5)" style="color:#FBBF24; font-weight:800;">★★★★★ 5</button>
+            <div style="display: flex; gap: 0.3rem; flex-wrap: wrap;">
+              <button id="tv-rate-5" class="btn-dark active" data-settings-nav="1" onclick="sendQuickTvRating(5)" style="color:#FBBF24; font-weight:800;">★★★★★ 5</button>
               <button id="tv-rate-4" class="btn-dark" data-settings-nav="1" onclick="sendQuickTvRating(4)" style="color:#FBBF24; font-weight:800;">★★★★ 4</button>
               <button id="tv-rate-3" class="btn-dark" data-settings-nav="1" onclick="sendQuickTvRating(3)" style="color:#FBBF24; font-weight:800;">★★★ 3</button>
               <button id="tv-rate-2" class="btn-dark" data-settings-nav="1" onclick="sendQuickTvRating(2)" style="color:#FBBF24; font-weight:800;">★★ 2</button>
               <button id="tv-rate-1" class="btn-dark" data-settings-nav="1" onclick="sendQuickTvRating(1)" style="color:#FBBF24; font-weight:800;">★ 1</button>
             </div>
           </div>
-          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap; align-items: center; margin-top: 0.35rem;">
-            <input id="tv-fb-author" class="input-field" style="flex: 1; min-width: 150px;" type="text" maxlength="50" placeholder="Ваше имя (необязательно)" />
-            <input id="tv-fb-message" class="input-field" style="flex: 2.5; min-width: 240px;" type="text" maxlength="600" placeholder="Напишите ваш вопрос, идею или отзыв разработчику…" />
-            <button id="tv-fb-send-btn" class="btn-cyan" data-settings-nav="1" onclick="submitTvFeedbackMessage()">💬 Отправить вопрос / отзыв</button>
+          <div style="display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.4rem;">
+            <div>
+              <div style="font-size: 0.84rem; font-weight: 700; color: var(--neon-cyan); margin-bottom: 0.25rem;">1. Ваше имя (необязательно — нажмите OK на пульте для ввода):</div>
+              <input id="tv-fb-author" class="text-input" data-settings-nav="1" style="width: 100%; min-height: 2.9rem; font-size: 1.06rem;" type="text" maxlength="50" placeholder="Нажмите OK, чтобы ввести ваше имя…" onclick="openTvTextInputModal('tv-fb-author', '✏️ Введите ваше имя')" />
+            </div>
+            <div>
+              <div style="font-size: 0.84rem; font-weight: 700; color: var(--neon-cyan); margin-bottom: 0.25rem;">2. Ваш вопрос, идея или отзыв разработчику (нажмите OK на пульте для ввода):</div>
+              <input id="tv-fb-message" class="text-input" data-settings-nav="1" style="width: 100%; min-height: 3.3rem; font-size: 1.08rem;" type="text" maxlength="600" placeholder="Нажмите OK, чтобы написать ваш вопрос, идею или отзыв разработчику…" onclick="openTvTextInputModal('tv-fb-message', '💬 Напишите ваш вопрос, идею или отзыв разработчику')" />
+            </div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 0.15rem;">
+              <button id="tv-fb-send-btn" class="btn-cyan" data-settings-nav="1" style="padding: 0.68rem 1.35rem; font-size: 0.98rem;" onclick="submitTvFeedbackMessage()">💬 Отправить вопрос / отзыв</button>
+            </div>
           </div>
-          <div id="tv-fb-status" style="margin-top: 0.45rem; font-size: 0.84rem; font-weight: 700; color: #4ADE80; display: none;"></div>
+          <div id="tv-fb-status" style="margin-top: 0.55rem; font-size: 0.92rem; font-weight: 700; color: #4ADE80; display: none;"></div>
           <div id="tv-my-feedback-box" style="display: none; margin-top: 0.7rem; padding-top: 0.65rem; border-top: 1px solid rgba(255,255,255,0.1);">
             <div style="font-size: 0.85rem; font-weight: 800; color: var(--neon-cyan); margin-bottom: 0.45rem;">🔔 Ваши обращения и ответы разработчика:</div>
             <div id="tv-my-feedback-list" style="display: flex; flex-direction: column; gap: 0.45rem;"></div>
@@ -4817,7 +4841,7 @@
     function getSettingsNavButtons() {
       const container = document.getElementById('screen-settings');
       if (!container) return [];
-      return Array.from(container.querySelectorAll('button[data-settings-nav="1"]'));
+      return Array.from(container.querySelectorAll('[data-settings-nav="1"]'));
     }
 
     function renderSettingsFocus() {
@@ -4905,10 +4929,24 @@
       return u.length > 0 || k.length > 0;
     }
 
+    function cleanTvVodPortalUrl(raw) {
+      let s = String(raw || '').replace(/\\\//g, '/').trim();
+      if (!s) return '';
+      while (/^[a-z]{3,7}:\/+[a-z]{3,7}:\/+/i.test(s)) {
+        s = s.replace(/^[a-z]{3,7}:\/+/i, '');
+      }
+      if (/^h+t+p+s:\/+/i.test(s)) {
+        s = s.replace(/^h+t+p+s:\/+/i, 'https://');
+      } else if (/^h+t+p+:\/+/i.test(s)) {
+        s = s.replace(/^h+t+p+:\/+/i, 'http://');
+      }
+      return s;
+    }
+
     function parsePortalStringPair(rawUrl, rawKey) {
-      let u = String(rawUrl || '').trim();
-      let k = String(rawKey || '').trim();
-      const re = /^(?:https?:\/\/)?portal::(?:\[([^\]]*)\])?\s*(https?:\/\/.+)$/i;
+      let u = String(rawUrl || '').replace(/\\\//g, '/').trim();
+      let k = String(rawKey || '').replace(/\\\//g, '/').trim();
+      const re = /^(?:[a-z]+:\/+)?portal::(?:\[([^\]]*)\])?\s*(.*)$/i;
       const mUrl = u.match(re);
       if (mUrl) {
         const bracket = mUrl[1] || '';
@@ -4931,6 +4969,13 @@
               if (ek) k = ek;
             }
           });
+        }
+      }
+      if (u) {
+        u = cleanTvVodPortalUrl(u);
+        const subMatch = u.match(/^https?:\/\/([0-9a-f]{8,20})\.([a-z0-9.-]+\.[a-z]{2,})(?:\/.*)?$/i);
+        if (subMatch && !k) {
+          k = subMatch[1];
         }
       }
       return { url: u, key: k };
@@ -6489,7 +6534,19 @@
 
     function submitSearchEnterAction() {
       const input = document.getElementById('search-input');
-      const q = (input ? input.value : '').trim();
+      const rawVal = input ? input.value : '';
+      const q = rawVal.trim();
+      if (state.searchMode === 'INPUT_TARGET') {
+        const targetEl = state.searchInputTargetId ? document.getElementById(state.searchInputTargetId) : null;
+        if (targetEl) {
+          targetEl.value = q;
+        }
+        closeSearchModal();
+        if (state.screen === 'SETTINGS') {
+          renderSettingsFocus();
+        }
+        return;
+      }
       if (state.searchMode === 'VOD') {
         state.vodSearchQuery = q;
         state.vodSelectedCategory = 'all';
@@ -6513,6 +6570,30 @@
           closeSearchModal();
         }
       }
+    }
+
+    function openTvTextInputModal(targetInputId, titleText) {
+      const targetEl = document.getElementById(targetInputId);
+      if (!targetEl) return;
+      state.searchMode = 'INPUT_TARGET';
+      state.searchInputTargetId = targetInputId;
+      const titleEl = document.getElementById('search-modal-title');
+      if (titleEl) {
+        titleEl.textContent = titleText || '✏️ Ввод текста';
+      }
+      initOnScreenKeyboard();
+      document.getElementById('search-modal').classList.remove('hidden');
+      const input = document.getElementById('search-input');
+      if (input) {
+        input.placeholder = targetEl.placeholder || 'Наберите текст пультом и нажмите ↵ ENTER...';
+        input.value = targetEl.value || '';
+      }
+      const resBox = document.getElementById('search-results');
+      if (resBox) resBox.style.display = 'none';
+      state.searchFocusZone = 'KB';
+      state.searchKbIdx = 11; // Start on 'А' / 'A'
+      state.searchResultIdx = 0;
+      renderSearchModalFocus();
     }
 
     function onTvKbPress(idx) {
@@ -6545,13 +6626,17 @@
 
     function openSearchModal(forcedMode) {
       state.searchMode = forcedMode || (state.screen === 'VOD' ? 'VOD' : 'CHANNELS');
+      state.searchInputTargetId = '';
       const titleEl = document.getElementById('search-modal-title');
       if (titleEl) {
         titleEl.textContent = state.searchMode === 'VOD' ? '🔍 Поиск фильма или сериала в Медиатеке' : '🔍 Поиск телеканала';
       }
+      const resBox = document.getElementById('search-results');
+      if (resBox) resBox.style.display = 'block';
       initOnScreenKeyboard();
       document.getElementById('search-modal').classList.remove('hidden');
       const input = document.getElementById('search-input');
+      input.placeholder = 'Наберите название пультом и нажмите ↵ ENTER...';
       input.value = state.searchMode === 'VOD' ? (state.vodSearchQuery || '') : '';
       state.searchFocusZone = 'KB';
       state.searchKbIdx = 11; // Start on 'А' / 'A'
@@ -6561,10 +6646,13 @@
     }
 
     function closeSearchModal() {
+      const resBox = document.getElementById('search-results');
+      if (resBox) resBox.style.display = 'block';
       document.getElementById('search-modal').classList.add('hidden');
     }
 
     function getSearchMatches() {
+      if (state.searchMode === 'INPUT_TARGET') return [];
       const q = (document.getElementById('search-input').value || '').trim().toLowerCase();
       if (state.searchMode === 'VOD') {
         return q
@@ -6581,6 +6669,12 @@
 
     function renderSearchResults() {
       const box = document.getElementById('search-results');
+      if (!box) return;
+      if (state.searchMode === 'INPUT_TARGET') {
+        box.style.display = 'none';
+        return;
+      }
+      box.style.display = 'block';
       const matches = getSearchMatches();
       if (matches.length === 0) {
         box.innerHTML = `<div style="padding: 0.65rem 0.85rem; color: var(--text-secondary); font-size: 0.86rem;">${state.searchMode === 'VOD' ? 'В загруженном списке совпадений нет — нажмите «↵ ENTER (НАЙТИ)» для поиска по всей базе портала' : 'Каналы не найдены'}</div>`;
@@ -7407,10 +7501,10 @@
 
     function getTvFeedbackClientId() {
       const KEY = 'minoga_feedback_client_id';
-      let cid = localStorage.getItem(KEY);
+      let cid = safeStorageGet(KEY, '');
       if (!cid || cid.length < 8) {
         cid = 'tv_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 10);
-        localStorage.setItem(KEY, cid);
+        safeStorageSet(KEY, cid);
       }
       return cid;
     }
@@ -7423,72 +7517,72 @@
       }
     }
 
-    async function sendQuickTvRating(stars) {
+    function sendQuickTvRating(stars) {
       updateTvRatingButtons(stars);
-      const msgEl = document.getElementById('tv-fb-message');
-      const text = msgEl ? msgEl.value.trim() : '';
-      if (!text) {
-        await submitTvFeedbackPayload(stars, 'Оценка из приложения Smart TV / Media Station X (' + stars + '★)', 'REVIEW');
-      } else {
-        await submitTvFeedbackMessage();
+      const st = document.getElementById('tv-fb-status');
+      if (st) {
+        st.style.display = 'block';
+        st.style.color = '#FBBF24';
+        st.textContent = '★ Выбрана оценка: ' + stars + ' из 5. Заполните поля ниже и нажмите «💬 Отправить вопрос / отзыв».';
       }
     }
 
-    async function submitTvFeedbackMessage() {
+    function submitTvFeedbackMessage() {
       const authorEl = document.getElementById('tv-fb-author');
       const msgEl = document.getElementById('tv-fb-message');
+      const author = authorEl ? authorEl.value.trim() : '';
       const text = msgEl ? msgEl.value.trim() : '';
-      if (!text || text.length < 2) {
-        const st = document.getElementById('tv-fb-status');
-        if (st) {
-          st.style.display = 'block';
-          st.style.color = '#FBBF24';
-          st.textContent = '⚠️ Пожалуйста, напишите ваш вопрос или отзыв в поле выше либо нажмите на оценку 1★–5★.';
+      const rating = selectedTvRating || 5;
+      const finalMessage = (text && text.length >= 2)
+        ? text
+        : ('Оценка программы из Smart TV / Media Station X (' + rating + ' ★)');
+      const isQuestion = finalMessage.indexOf('?') !== -1;
+      submitTvFeedbackPayload(rating, finalMessage, isQuestion ? 'QUESTION' : 'REVIEW', author, function(ok) {
+        if (ok && msgEl) {
+          msgEl.value = '';
         }
-        return;
-      }
-      const isQuestion = text.indexOf('?') !== -1;
-      await submitTvFeedbackPayload(selectedTvRating || 5, text, isQuestion ? 'QUESTION' : 'REVIEW', authorEl ? authorEl.value.trim() : '');
-      if (msgEl) msgEl.value = '';
+      });
     }
 
-    async function submitTvFeedbackPayload(rating, message, category, author) {
+    function submitTvFeedbackPayload(rating, message, category, author, onDone) {
       const st = document.getElementById('tv-fb-status');
-      try {
-        const res = await fetch('/api/feedback/submit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            clientId: getTvFeedbackClientId(),
-            author: author || 'Smart TV зритель',
-            device: 'Smart TV (MSX)',
-            category: category || 'QUESTION',
-            rating: rating || 5,
-            message: message
-          })
-        });
-        const data = await res.json();
-        if (st) {
-          st.style.display = 'block';
-          st.style.color = data.ok ? '#4ADE80' : '#F87171';
-          st.textContent = data.message || (data.ok ? '✓ Спасибо! Ваше сообщение отправлено разработчику.' : 'Ошибка отправки');
-        }
-        loadTvMyFeedback();
-      } catch (e) {
-        if (st) {
-          st.style.display = 'block';
-          st.style.color = '#F87171';
-          st.textContent = 'Ошибка соединения с сервером.';
-        }
+      if (st) {
+        st.style.display = 'block';
+        st.style.color = '#00E5FF';
+        st.textContent = '⏳ Отправка оценки и сообщения разработчику…';
       }
+      const cleanAuthor = (author || '').trim() || 'Smart TV зритель';
+      const payload = {
+        clientId: getTvFeedbackClientId(),
+        authorName: cleanAuthor,
+        author: cleanAuthor,
+        deviceType: 'Smart TV (MSX)',
+        device: 'Smart TV (MSX)',
+        category: category || 'REVIEW',
+        rating: rating || 5,
+        text: message,
+        message: message
+      };
+      xhrRequestJson('POST', '/api/feedback/submit', payload, function(err, data) {
+        const isOk = !err && data && (data.ok === true || data.status === 'OK');
+        if (st) {
+          st.style.display = 'block';
+          st.style.color = isOk ? '#4ADE80' : '#F87171';
+          st.textContent = isOk
+            ? (data.message || ('✓ Спасибо! Ваша оценка (' + (rating || 5) + '★) и сообщение отправлены разработчику.'))
+            : ((data && (data.error || data.message)) || 'Ошибка отправки. Проверьте соединение с сервером.');
+        }
+        if (isOk) {
+          loadTvMyFeedback();
+        }
+        if (onDone) onDone(isOk);
+      });
     }
 
-    async function loadTvMyFeedback() {
-      try {
-        const cid = encodeURIComponent(getTvFeedbackClientId());
-        const res = await fetch('/api/feedback/public?clientId=' + cid);
-        if (!res.ok) return;
-        const data = await res.json();
+    function loadTvMyFeedback() {
+      const cid = encodeURIComponent(getTvFeedbackClientId());
+      xhrRequestJson('GET', '/api/feedback/public?clientId=' + cid, null, function(err, data) {
+        if (err || !data) return;
         const myItems = data.myItems || [];
         const box = document.getElementById('tv-my-feedback-box');
         const list = document.getElementById('tv-my-feedback-list');
@@ -7501,7 +7595,7 @@
         box.style.display = 'block';
 
         let latestRepliedTimestamp = 0;
-        list.innerHTML = myItems.map(item => {
+        list.innerHTML = myItems.map(function(item) {
           const stars = '★'.repeat(item.rating || 5) + '☆'.repeat(5 - (item.rating || 5));
           const hasReply = item.replyText && item.replyText.trim().length > 0;
           if (hasReply && item.repliedAt > latestRepliedTimestamp) {
@@ -7509,33 +7603,34 @@
           }
           const stText = hasReply ? '✅ Получен ответ разработчика' : '⏳ Передано разработчику (ожидает ответа)';
           const stColor = hasReply ? '#4ADE80' : '#FBBF24';
-          return '<div style="background: rgba(7, 9, 14, 0.72); border: 1px solid rgba(0, 229, 255, 0.25); border-radius: 0.65rem; padding: 0.55rem 0.75rem; font-size: 0.82rem;">'
+          const msgBody = item.text || item.message || '';
+          return '<div style="background: rgba(7, 9, 14, 0.72); border: 1px solid rgba(0, 229, 255, 0.25); border-radius: 0.65rem; padding: 0.55rem 0.75rem; font-size: 0.86rem;">'
             + '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.25rem;">'
             + '<span style="color:#FBBF24; font-weight:800;">' + stars + '</span>'
-            + '<span style="color:' + stColor + '; font-weight:700; font-size:0.76rem;">' + stText + '</span>'
+            + '<span style="color:' + stColor + '; font-weight:700; font-size:0.78rem;">' + stText + '</span>'
             + '</div>'
-            + '<div style="color:#E2E8F0; line-height:1.4;">' + escapeHtml(item.message) + '</div>'
+            + '<div style="color:#E2E8F0; line-height:1.45;">' + escapeHtml(msgBody) + '</div>'
             + (hasReply
                 ? '<div style="margin-top:0.4rem; padding:0.45rem 0.65rem; background:rgba(16,185,129,0.12); border-left:3px solid #10B981; border-radius:0.4rem; color:#D1FAE5;">'
-                  + '<div style="font-size:0.74rem; font-weight:800; color:#34D399; margin-bottom:0.15rem;">👨‍💻 Ответ разработчика Minoga TV Box:</div>'
+                  + '<div style="font-size:0.76rem; font-weight:800; color:#34D399; margin-bottom:0.15rem;">👨‍💻 Ответ разработчика Minoga TV Box:</div>'
                   + '<div>' + escapeHtml(item.replyText) + '</div>'
                   + '</div>'
                 : '')
             + '</div>';
         }).join('');
 
-        const seenReplyAt = Number(localStorage.getItem('minoga_seen_reply_at') || '0');
+        const seenReplyAt = Number(safeStorageGet('minoga_seen_reply_at', '0'));
         const banner = document.getElementById('tv-reply-banner');
         if (banner) {
           if (latestRepliedTimestamp > seenReplyAt && state.screen !== 'SETTINGS') {
             banner.style.display = 'block';
             banner.dataset.latestReply = String(latestRepliedTimestamp);
           } else if (state.screen === 'SETTINGS' && latestRepliedTimestamp > 0) {
-            localStorage.setItem('minoga_seen_reply_at', String(latestRepliedTimestamp));
+            safeStorageSet('minoga_seen_reply_at', String(latestRepliedTimestamp));
             banner.style.display = 'none';
           }
         }
-      } catch (e) {}
+      });
     }
 
     function openSettingsToFeedback() {

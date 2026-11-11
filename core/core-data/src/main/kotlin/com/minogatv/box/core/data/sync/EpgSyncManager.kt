@@ -23,12 +23,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -148,6 +152,7 @@ class EpgSyncManager @Inject constructor(
             delay(600)
             _syncProgress.value = null
             isSyncing.set(false)
+            piconResolver.resolveMissingLogos()
             piconResolver.cacheAllRemoteLogos()
             return@withContext Result.success(validCount)
         }
@@ -159,16 +164,29 @@ class EpgSyncManager @Inject constructor(
             val playlist = playlistEntity?.toDomain() ?: Playlist(id = 0L, profileId = 1L, name = "Default", url = "")
 
             val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
-            val customEpgPref = prefs.getString("custom_epg_url", null)?.trim()?.takeIf { it.isNotBlank() }
+            val rawCustomEpgPref = prefs.getString("custom_epg_url", null)?.trim()?.takeIf { it.isNotBlank() }
+            if (rawCustomEpgPref != null && isDefaultFallbackUrl(rawCustomEpgPref) && !rawCustomEpgPref.equals(Playlist.LIVE_SERVER_EPG, ignoreCase = true)) {
+                prefs.edit().putString("custom_epg_url", Playlist.LIVE_SERVER_EPG).apply()
+            }
+            val isExplicitLiveServerEpg = epgUrl?.trim()?.equals(Playlist.LIVE_SERVER_EPG, ignoreCase = true) == true ||
+                rawCustomEpgPref == null ||
+                rawCustomEpgPref.equals(Playlist.LIVE_SERVER_EPG, ignoreCase = true) ||
+                isDefaultFallbackUrl(rawCustomEpgPref)
 
-            val rawTargetUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
-                ?: playlistEntity?.epgUrl?.trim()?.takeIf { it.isNotEmpty() }
-                ?: customEpgPref
-                ?: Playlist.DEFAULT_EPG_URL
+            val customEpgPref = if (isExplicitLiveServerEpg) null else rawCustomEpgPref
+
+            val rawTargetUrl = if (isExplicitLiveServerEpg) {
+                Playlist.LIVE_SERVER_EPG
+            } else {
+                epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: customEpgPref
+                    ?: playlistEntity?.epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: Playlist.DEFAULT_EPG_URL
+            }
 
             val targetUrl = Playlist.normalizeUrl(rawTargetUrl)
 
-            val isManualLink = isManualUrl(
+            val isManualLink = !isExplicitLiveServerEpg && isManualUrl(
                 targetUrl = targetUrl,
                 customEpgPref = customEpgPref,
                 explicitEpgParam = epgUrl,
@@ -182,6 +200,32 @@ class EpgSyncManager @Inject constructor(
                 .followRedirects(true)
                 .followSslRedirects(true)
                 .build()
+
+            // When no manual custom EPG source is configured (e.g. left empty on web pairing page),
+            // first fetch the pre-indexed ready-to-use EPG schedule from the Minoga TV server
+            // (same fast method used by Media Station X / Smart TV).
+            if (!isManualLink) {
+                val allChannelsForServer = channelDao.getAll()
+                if (allChannelsForServer.isNotEmpty()) {
+                    val serverSyncResult = syncFromPreIndexedServer(
+                        client = client,
+                        allChannels = allChannelsForServer,
+                        onProgress = { pct, st -> updateProgress(pct, st) },
+                    )
+                    if (serverSyncResult.isSuccess && (serverSyncResult.getOrDefault(0) > 0)) {
+                        val importedCount = serverSyncResult.getOrDefault(0)
+                        val cutoff = System.currentTimeMillis() - 7 * 24 * 3600_000L
+                        epgDao.deleteBeforeTime(cutoff)
+                        piconResolver.resolveMissingLogos()
+                        piconResolver.cacheAllRemoteLogos()
+                        updateProgress(100, "Телепрограмма с сервера загружена ($importedCount передач)")
+                        _lastSyncTime.value = System.currentTimeMillis()
+                        delay(1000)
+                        _syncProgress.value = null
+                        return@withContext Result.success(importedCount)
+                    }
+                }
+            }
 
             var successfulUrl: String? = null
 
@@ -517,6 +561,211 @@ class EpgSyncManager @Inject constructor(
     }
 
     /**
+     * Fetches already-parsed, pre-indexed EPG schedule and channel icons directly from the
+     * Minoga TV Box server (/api/tv/epg/status & /api/tv/epg/live?full=1), identical to Media Station X.
+     */
+    private suspend fun syncFromPreIndexedServer(
+        client: OkHttpClient,
+        allChannels: List<ChannelEntity>,
+        onProgress: suspend (Int, String) -> Unit,
+    ): Result<Int> {
+        val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+        val rawWebBase = prefs.getString("web_config_url", null)?.trim()?.takeIf { it.isNotBlank() }
+            ?: Playlist.DEFAULT_WEB_CONFIG_URL
+        val cleanBase = rawWebBase.trimEnd('/')
+        val serverBases = listOf(
+            "https://minogatvbox.duckdns.org",
+            if (cleanBase.startsWith("http://", ignoreCase = true)) "https://" + cleanBase.removePrefix("http://") else cleanBase,
+            cleanBase,
+        ).distinct()
+
+        val encodedDefaultEpg = URLEncoder.encode("http://epg.one/epg2.xml.gz", "UTF-8")
+        var activeBase: String? = null
+
+        onProgress(8, "Подключение к серверу готовой телепрограммы…")
+
+        for (base in serverBases) {
+            var ready = false
+            for (attempt in 1..40) {
+                try {
+                    val statusReq = Request.Builder()
+                        .url("$base/api/tv/epg/status?url=$encodedDefaultEpg&t=${System.currentTimeMillis()}")
+                        .get()
+                        .build()
+                    val statusJson = client.newCall(statusReq).execute().use { resp ->
+                        if (resp.isSuccessful) resp.body?.string() else null
+                    } ?: break
+
+                    val stObj = JSONObject(statusJson)
+                    val st = stObj.optString("status")
+                    if (st == "READY") {
+                        ready = true
+                        break
+                    } else if (st == "LOADING") {
+                        val srvPct = stObj.optInt("progress", 10)
+                        val stage = stObj.optString("stage").ifBlank { "Подготовка телепрограммы на сервере…" }
+                        onProgress((10 + srvPct * 35 / 100).coerceIn(10, 45), stage)
+                        delay(1000)
+                    } else {
+                        break
+                    }
+                } catch (_: Exception) {
+                    break
+                }
+            }
+            if (ready) {
+                activeBase = base
+                break
+            }
+        }
+
+        val serverBase = activeBase ?: return Result.failure(IOException("Сервер готовой телепрограммы недоступен"))
+        onProgress(48, "Загрузка готовой программы с сервера…")
+
+        val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+        val chunks = allChannels.chunked(150)
+        val totalImported = AtomicInteger(0)
+        val channelUpdates = mutableListOf<ChannelDao.ChannelEpgLogoUpdate>()
+
+        for ((chunkIdx, chunk) in chunks.withIndex()) {
+            val sb = StringBuilder(chunk.size * 96 + 64)
+            sb.append("{\"url\":\"http://epg.one/epg2.xml.gz\",\"full\":true,\"channels\":[")
+            chunk.forEachIndexed { idx, ch ->
+                if (idx > 0) sb.append(',')
+                sb.append("{\"id\":").append(ch.id)
+                    .append(",\"tvgId\":\"").append(escapeJsonForServer(ch.epgChannelId)).append("\"")
+                    .append(",\"name\":\"").append(escapeJsonForServer(ch.name)).append("\"}")
+            }
+            sb.append("]}")
+
+            val req = Request.Builder()
+                .url("$serverBase/api/tv/epg/live?full=1")
+                .post(sb.toString().toRequestBody(jsonMediaType))
+                .header("Accept", "application/json")
+                .build()
+
+            val respStr = try {
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) resp.body?.string() else null
+                }
+            } catch (_: Exception) {
+                null
+            } ?: continue
+
+            if (!respStr.startsWith("{")) continue
+            val root = try {
+                JSONObject(respStr)
+            } catch (_: Exception) {
+                continue
+            }
+            val liveObj = root.optJSONObject("live") ?: continue
+            val batchEntities = ArrayList<EpgProgramEntity>(chunk.size * 24)
+
+            for (ch in chunk) {
+                val chObj = liveObj.optJSONObject(ch.id.toString()) ?: continue
+                val effectiveEpgId = ch.epgChannelId.trim().ifEmpty { "srv_epg_${ch.id}" }
+                val iconUrl = chObj.optString("ic").trim()
+
+                val newEpgId = if (ch.epgChannelId != effectiveEpgId) effectiveEpgId else null
+                val existingLogo = ch.logoUrl?.trim().orEmpty()
+                val shouldUpdateLogo = iconUrl.isNotEmpty() && (
+                    existingLogo.isEmpty() ||
+                        existingLogo.contains("vattik/picons-rtrs", ignoreCase = true) ||
+                        existingLogo.contains("it999.github.io", ignoreCase = true)
+                    )
+                val newLogo = if (shouldUpdateLogo) iconUrl else null
+                if (newEpgId != null || newLogo != null) {
+                    channelUpdates.add(
+                        ChannelDao.ChannelEpgLogoUpdate(
+                            id = ch.id,
+                            epgChannelId = newEpgId,
+                            logoUrl = newLogo,
+                        )
+                    )
+                }
+
+                val pArr = chObj.optJSONArray("p")
+                if (pArr != null && pArr.length() > 0) {
+                    for (i in 0 until pArr.length()) {
+                        val pObj = pArr.optJSONObject(i) ?: continue
+                        val s = pObj.optLong("s", 0L)
+                        val e = pObj.optLong("e", 0L)
+                        val t = pObj.optString("t").trim()
+                        val d = pObj.optString("d").trim()
+                        if (s > 0L && e > s && t.isNotEmpty()) {
+                            batchEntities.add(
+                                EpgProgramEntity(
+                                    channelEpgId = effectiveEpgId,
+                                    title = t,
+                                    description = d,
+                                    startMs = s,
+                                    endMs = e,
+                                )
+                            )
+                        }
+                    }
+                } else {
+                    val curTitle = chObj.optString("t").trim()
+                    val curStart = chObj.optLong("s", 0L)
+                    val curEnd = chObj.optLong("e", 0L)
+                    if (curTitle.isNotEmpty() && curStart > 0L && curEnd > curStart) {
+                        batchEntities.add(
+                            EpgProgramEntity(
+                                channelEpgId = effectiveEpgId,
+                                title = curTitle,
+                                description = "",
+                                startMs = curStart,
+                                endMs = curEnd,
+                            )
+                        )
+                    }
+                    val nextTitle = chObj.optString("nt").trim()
+                    val nextStart = chObj.optLong("ns", 0L)
+                    val nextEnd = chObj.optLong("ne", 0L)
+                    if (nextTitle.isNotEmpty() && nextStart > 0L && nextEnd > nextStart) {
+                        batchEntities.add(
+                            EpgProgramEntity(
+                                channelEpgId = effectiveEpgId,
+                                title = nextTitle,
+                                description = "",
+                                startMs = nextStart,
+                                endMs = nextEnd,
+                            )
+                        )
+                    }
+                }
+            }
+
+            if (batchEntities.isNotEmpty()) {
+                epgDao.upsertAll(batchEntities)
+                val tot = totalImported.addAndGet(batchEntities.size)
+                val pct = (50 + ((chunkIdx + 1) * 45 / chunks.size.coerceAtLeast(1))).coerceIn(50, 95)
+                onProgress(pct, "Импорт готовой программы… ($tot передач)")
+                yield()
+            }
+        }
+
+        if (channelUpdates.isNotEmpty()) {
+            channelDao.updateEpgAndLogos(channelUpdates)
+        }
+
+        val finalTotal = totalImported.get()
+        return if (finalTotal > 0) {
+            Result.success(finalTotal)
+        } else {
+            Result.failure(IOException("Сервер вернул пустой список передач"))
+        }
+    }
+
+    private fun escapeJsonForServer(s: String): String {
+        return s.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", " ")
+            .replace("\r", "")
+            .replace("\t", " ")
+    }
+
+    /**
      * Determines whether the given URL represents an explicit user-configured manual EPG link.
      */
     private fun isManualUrl(
@@ -525,8 +774,11 @@ class EpgSyncManager @Inject constructor(
         explicitEpgParam: String?,
         playlistEntityEpg: String?,
     ): Boolean {
-        if (!customEpgPref.isNullOrBlank() && Playlist.normalizeUrl(customEpgPref) == targetUrl) {
-            return true
+        if (!customEpgPref.isNullOrBlank()) {
+            val norm = Playlist.normalizeUrl(customEpgPref)
+            if (!isDefaultFallbackUrl(norm) && norm == targetUrl) {
+                return true
+            }
         }
         if (!explicitEpgParam.isNullOrBlank()) {
             val norm = Playlist.normalizeUrl(explicitEpgParam)
@@ -540,8 +792,10 @@ class EpgSyncManager @Inject constructor(
     }
 
     private fun isDefaultFallbackUrl(url: String): Boolean {
+        if (url.trim().equals(Playlist.LIVE_SERVER_EPG, ignoreCase = true)) return true
         val norm = Playlist.normalizeUrl(url).lowercase(Locale.ROOT)
         val defaults = listOf(
+            Playlist.LIVE_SERVER_EPG.lowercase(Locale.ROOT),
             Playlist.DEFAULT_EPG_URL,
             Playlist.DEFAULT_PUBLIC_EPG_URL,
             Playlist.IT999_GITHUB_EPG_URL,
@@ -610,7 +864,7 @@ class EpgSyncManager @Inject constructor(
     suspend fun fetchMissingEpgForChannel(channelId: Long): Boolean = withContext(Dispatchers.IO) {
         if (isSyncing.get()) return@withContext false
         val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
-        val customEpg = prefs.getString("custom_epg_url", null)?.trim()?.takeIf { it.isNotBlank() }
+        val customEpg = prefs.getString("custom_epg_url", null)?.trim()?.takeIf { it.isNotBlank() && !isDefaultFallbackUrl(it) }
         if (!customEpg.isNullOrBlank()) {
             // User set link manually -> do NOT query external fallback feeds
             return@withContext false
@@ -626,7 +880,60 @@ class EpgSyncManager @Inject constructor(
             }
         }
 
-        // On-demand fetch is non-blocking: avoid downloading multi-megabyte archives on channel focus
+        // 2. Fast on-demand query to Minoga TV pre-indexed EPG server (/api/tv/epg/channel)
+        try {
+            val client = clientFactory.create(Playlist(id = 0L, profileId = 1L, name = "OnDemandEpg", url = ""))
+                .newBuilder()
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
+                .build()
+            val tvgEnc = URLEncoder.encode(channel.epgChannelId.trim(), "UTF-8")
+            val nameEnc = URLEncoder.encode(channel.name.trim(), "UTF-8")
+            val req = Request.Builder()
+                .url("https://minogatvbox.duckdns.org/api/tv/epg/channel?tvgId=$tvgEnc&name=$nameEnc")
+                .get()
+                .build()
+            val bodyStr = client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) resp.body?.string() else null
+            }
+            if (!bodyStr.isNullOrBlank() && bodyStr.startsWith("{")) {
+                val obj = JSONObject(bodyStr)
+                val progs = obj.optJSONArray("programs")
+                if (progs != null && progs.length() > 0) {
+                    val effectiveEpgId = channel.epgChannelId.trim().ifEmpty { "srv_epg_${channel.id}" }
+                    if (channel.epgChannelId != effectiveEpgId) {
+                        channelDao.updateEpgAndLogos(
+                            listOf(ChannelDao.ChannelEpgLogoUpdate(id = channel.id, epgChannelId = effectiveEpgId, logoUrl = null))
+                        )
+                    }
+                    val entities = ArrayList<EpgProgramEntity>(progs.length())
+                    for (i in 0 until progs.length()) {
+                        val p = progs.optJSONObject(i) ?: continue
+                        val s = p.optLong("s", 0L)
+                        val e = p.optLong("e", 0L)
+                        val t = p.optString("t").trim()
+                        val d = p.optString("d").trim()
+                        if (s > 0L && e > s && t.isNotEmpty()) {
+                            entities.add(
+                                EpgProgramEntity(
+                                    channelEpgId = effectiveEpgId,
+                                    title = t,
+                                    description = d,
+                                    startMs = s,
+                                    endMs = e,
+                                )
+                            )
+                        }
+                    }
+                    if (entities.isNotEmpty()) {
+                        epgDao.upsertAll(entities)
+                        return@withContext true
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+
         return@withContext false
     }
 

@@ -447,19 +447,42 @@ class PlaylistRepositoryImpl @Inject constructor(
         try {
             val rawPlaylistUrl = webConfig.playlistUrl.trim()
             val cleanPlaylistUrl = if (rawPlaylistUrl.isNotBlank()) Playlist.normalizeUrl(rawPlaylistUrl) else ""
-            val cleanEpgUrl = webConfig.epgUrl?.trim()?.takeIf { it.isNotBlank() }?.let { Playlist.normalizeUrl(it) }
+            val rawEpgTrimmed = webConfig.epgUrl?.trim().orEmpty()
+            val isDefaultEpg = rawEpgTrimmed.isEmpty() ||
+                rawEpgTrimmed.equals(Playlist.DEFAULT_EPG_URL, ignoreCase = true) ||
+                rawEpgTrimmed.equals("http://epg.one/epg2.xml.gz", ignoreCase = true) ||
+                rawEpgTrimmed.equals("https://epg.one/epg2.xml.gz", ignoreCase = true)
+            val cleanEpgUrl = if (isDefaultEpg) null else Playlist.normalizeUrl(rawEpgTrimmed)
 
             val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
             val editor = prefs.edit()
             editor.putString("web_config_url", webConfig.sourcePageUrl)
             if (cleanEpgUrl != null) {
                 editor.putString("custom_epg_url", cleanEpgUrl)
+            } else {
+                editor.remove("custom_epg_url")
             }
             if (!webConfig.vodUrl.isNullOrBlank() || !webConfig.vodKey.isNullOrBlank()) {
-                editor.putString("vod_portal_url", webConfig.vodUrl?.trim().orEmpty())
+                var cleanVodU = webConfig.vodUrl?.replace("\\/", "/")?.trim().orEmpty()
+                var cleanVodK = webConfig.vodKey?.replace("\\/", "/")?.trim().orEmpty()
+                while (cleanVodU.matches(Regex("^[a-z]{3,7}:/+[a-z]{3,7}:/+.*", RegexOption.IGNORE_CASE))) {
+                    cleanVodU = cleanVodU.replaceFirst(Regex("^[a-z]{3,7}:/+", RegexOption.IGNORE_CASE), "")
+                }
+                cleanVodU = when {
+                    cleanVodU.matches(Regex("^h+t+p+s:/+.*", RegexOption.IGNORE_CASE)) ->
+                        cleanVodU.replaceFirst(Regex("^h+t+p+s:/+", RegexOption.IGNORE_CASE), "https://")
+                    cleanVodU.matches(Regex("^h+t+p+:/+.*", RegexOption.IGNORE_CASE)) ->
+                        cleanVodU.replaceFirst(Regex("^h+t+p+:/+", RegexOption.IGNORE_CASE), "http://")
+                    else -> cleanVodU
+                }
+                val subMatch = Regex("^https?://([0-9a-f]{8,20})\\.([a-z0-9.-]+\\.[a-z]{2,})(?:/.*)?$", RegexOption.IGNORE_CASE).find(cleanVodU)
+                if (subMatch != null && cleanVodK.isEmpty()) {
+                    cleanVodK = subMatch.groupValues.getOrNull(1).orEmpty().trim()
+                }
+                editor.putString("vod_portal_url", cleanVodU)
                 editor.putString("vod_portal_login", webConfig.vodLogin?.trim().orEmpty())
                 editor.putString("vod_portal_password", webConfig.vodPassword?.trim().orEmpty())
-                editor.putString("vod_portal_key", webConfig.vodKey?.trim().orEmpty())
+                editor.putString("vod_portal_key", cleanVodK)
             }
             editor.apply()
 
@@ -477,7 +500,7 @@ class PlaylistRepositoryImpl @Inject constructor(
                 matchingExisting.toDomain().copy(
                     name = webConfig.name.ifBlank { matchingExisting.name },
                     url = cleanPlaylistUrl,
-                    epgUrl = cleanEpgUrl ?: matchingExisting.epgUrl,
+                    epgUrl = cleanEpgUrl,
                 )
             } else {
                 Playlist(

@@ -1,6 +1,7 @@
 package com.minogatv.box.feature.vod
 
 import android.content.Context
+import android.content.res.Configuration
 import android.net.Uri
 import android.view.KeyEvent
 import android.view.ViewGroup
@@ -14,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,11 +31,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -68,11 +72,14 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -82,7 +89,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,6 +100,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -100,6 +111,7 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.minogatv.box.core.model.Playlist
 import com.minogatv.box.feature.settings.VodPortalConfigDialog
+import com.minogatv.box.feature.ui.LocalScreenKeyDispatcher
 import com.minogatv.box.feature.ui.RemoteControlHintBar
 import com.minogatv.box.feature.ui.RemoteHint
 import kotlinx.coroutines.Dispatchers
@@ -230,7 +242,7 @@ fun VodLibraryScreen(
     var selectedSort by remember { mutableStateOf(VodSortOption.ADDED) }
     var searchQuery by remember { mutableStateOf("") }
 
-    var isLoading by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(vodUrl.isNotBlank() || vodKey.isNotBlank()) }
     var isLoadingMore by remember { mutableStateOf(false) }
     var totalCount by remember { mutableIntStateOf(0) }
     var nextOffset by remember { mutableIntStateOf(0) }
@@ -240,6 +252,7 @@ fun VodLibraryScreen(
     var showPortalDialog by remember { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var detailsItem by remember { mutableStateOf<VodMovieItem?>(null) }
+    var isLoadingDetailsEpisodes by remember { mutableStateOf(false) }
 
     // Active VOD playback state
     var playingItem by remember { mutableStateOf<VodMovieItem?>(null) }
@@ -248,7 +261,11 @@ fun VodLibraryScreen(
     var playingUrl by remember { mutableStateOf("") }
     var playingTitle by remember { mutableStateOf("") }
 
+    val configuration = LocalConfiguration.current
+    val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT || configuration.screenWidthDp < 600
     val hasPortalConfig = vodUrl.isNotBlank() || vodKey.isNotBlank()
+    val gridState = rememberLazyGridState()
+    val firstPosterFocusRequester = remember { FocusRequester() }
 
     fun resolveServerCategoryParam(cat: String): String {
         if (cat == "fav" || cat == "history" || cat == "uhd") return "all"
@@ -283,8 +300,8 @@ fun VodLibraryScreen(
                 vodPassword = p,
                 vodKey = k,
                 category = resolveServerCategoryParam(selectedCategory),
-                genre = selectedGenre,
-                year = selectedYear,
+                genre = if (selectedGenre == "all") "" else selectedGenre,
+                year = if (selectedYear == "all") "" else selectedYear,
                 sort = selectedSort.id,
                 search = searchQuery,
                 offset = reqOffset,
@@ -309,6 +326,11 @@ fun VodLibraryScreen(
                     allItems = allItems + newItems
                 } else {
                     allItems = res.items
+                    launch {
+                        if (gridState.layoutInfo.totalItemsCount > 0) {
+                            runCatching { gridState.scrollToItem(0) }
+                        }
+                    }
                 }
                 if (res.categories.isNotEmpty()) {
                     providerCategories = res.categories
@@ -337,9 +359,11 @@ fun VodLibraryScreen(
         }
     }
 
-    LaunchedEffect(vodUrl, vodLogin, vodPassword, vodKey, selectedCategory, selectedGenre, selectedYear, searchQuery) {
+    LaunchedEffect(vodUrl, vodLogin, vodPassword, vodKey, selectedCategory, selectedGenre, selectedYear, selectedSort, searchQuery) {
         if ((vodUrl.isNotBlank() || vodKey.isNotBlank()) && selectedCategory != "fav" && selectedCategory != "history") {
             triggerCatalogReload(vodUrl, vodLogin, vodPassword, vodKey, append = false)
+        } else if (gridState.layoutInfo.totalItemsCount > 0) {
+            runCatching { gridState.scrollToItem(0) }
         }
     }
 
@@ -359,6 +383,40 @@ fun VodLibraryScreen(
             .apply()
     }
 
+    LaunchedEffect(detailsItem?.id) {
+        val current = detailsItem ?: run {
+            isLoadingDetailsEpisodes = false
+            return@LaunchedEffect
+        }
+        if (current.episodes.isEmpty() && (current.requestJson.isNotBlank() || current.cmd.isNotBlank())) {
+            isLoadingDetailsEpisodes = true
+            val resolved = resolveVodStreamAndEpisodes(
+                webConfigUrl = prefs.getString("web_config_url", Playlist.DEFAULT_WEB_CONFIG_URL)
+                    ?: Playlist.DEFAULT_WEB_CONFIG_URL,
+                vodUrl = vodUrl,
+                vodLogin = vodLogin,
+                vodPassword = vodPassword,
+                vodKey = vodKey,
+                cmd = current.cmd,
+                requestJson = current.requestJson,
+            )
+            isLoadingDetailsEpisodes = false
+            if (resolved.episodes.isNotEmpty() || resolved.streamUrl.isNotBlank()) {
+                val updated = current.copy(
+                    streamUrl = resolved.streamUrl.ifBlank { current.streamUrl },
+                    episodes = if (resolved.episodes.isNotEmpty()) resolved.episodes else current.episodes,
+                )
+                if (detailsItem?.id == current.id) {
+                    detailsItem = updated
+                }
+                allItems = allItems.map { if (it.id == current.id) updated else it }
+                savedItemsCache = savedItemsCache + (current.id to updated)
+            }
+        } else {
+            isLoadingDetailsEpisodes = false
+        }
+    }
+
     fun recordHistoryAndPlay(
         item: VodMovieItem,
         streamUrl: String,
@@ -372,7 +430,7 @@ fun VodLibraryScreen(
             if (item.cmd.isNotBlank() || reqJson.isNotBlank()) {
                 Toast.makeText(context, "Получение видеопотока с портала…", Toast.LENGTH_SHORT).show()
                 scope.launch {
-                    val resolved = resolveVodStreamOnDemand(
+                    val resolved = resolveVodStreamAndEpisodes(
                         webConfigUrl = prefs.getString("web_config_url", Playlist.DEFAULT_WEB_CONFIG_URL)
                             ?: Playlist.DEFAULT_WEB_CONFIG_URL,
                         vodUrl = vodUrl,
@@ -382,16 +440,37 @@ fun VodLibraryScreen(
                         cmd = item.cmd,
                         requestJson = reqJson,
                     )
-                    if (resolved.isNotBlank()) {
-                        val nextHist = (listOf(item.id) + historyIds.filter { it != item.id }).take(60)
+                    if (resolved.streamUrl.isNotBlank()) {
+                        val updatedItem = if (item.episodes.isEmpty() && resolved.episodes.isNotEmpty()) {
+                            val copy = item.copy(
+                                episodes = resolved.episodes,
+                                streamUrl = resolved.streamUrl.ifBlank { item.streamUrl },
+                            )
+                            allItems = allItems.map { if (it.id == item.id) copy else it }
+                            savedItemsCache = savedItemsCache + (item.id to copy)
+                            copy
+                        } else if (epIdx in item.episodes.indices) {
+                            val updatedEps = item.episodes.mapIndexed { idx, ep ->
+                                if (idx == epIdx && ep.streamUrl.isBlank()) ep.copy(streamUrl = resolved.streamUrl) else ep
+                            }
+                            item.copy(episodes = updatedEps)
+                        } else {
+                            item
+                        }
+                        val effectiveEpIdx = when {
+                            epIdx >= 0 -> epIdx
+                            updatedItem.episodes.size > 1 -> 0
+                            else -> -1
+                        }
+                        val nextHist = (listOf(updatedItem.id) + historyIds.filter { it != updatedItem.id }).take(60)
                         historyIds = nextHist
                         prefs.edit().putString("vod_history_csv", nextHist.joinToString(",")).apply()
-                        recordEpisodeWatched(item.id, epIdx)
+                        recordEpisodeWatched(updatedItem.id, effectiveEpIdx)
                         detailsItem = null
-                        playingItem = item
-                        playingEpisodeIdx = epIdx
+                        playingItem = updatedItem
+                        playingEpisodeIdx = effectiveEpIdx
                         playingResumeSec = resumeSec
-                        playingUrl = resolved
+                        playingUrl = resolved.streamUrl
                         playingTitle = displayTitle
                     } else {
                         Toast.makeText(context, "Портал не вернул прямую ссылку на поток", Toast.LENGTH_SHORT).show()
@@ -505,15 +584,45 @@ fun VodLibraryScreen(
             true
         }
 
+        val yearRegex = Regex("\\b(19\\d{2}|20\\d{2})\\b")
+        fun parseRatingValue(item: VodMovieItem): Double {
+            val candidates = listOf(item.rating, item.ratingKp, item.ratingImdb)
+            var best = 0.0
+            for (raw in candidates) {
+                if (raw.isBlank()) continue
+                val clean = raw.replace(',', '.').trim()
+                val num = Regex("\\d+(?:\\.\\d+)?").find(clean)?.value?.toDoubleOrNull() ?: 0.0
+                if (num > best) best = num
+            }
+            return best
+        }
+        fun parseYearValue(item: VodMovieItem): Int {
+            val direct = item.year.trim().toIntOrNull()
+            if (direct != null && direct in 1900..2099) return direct
+            val fromYear = yearRegex.find(item.year)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            if (fromYear != null) return fromYear
+            val fromTitle = yearRegex.find(item.title)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            if (fromTitle != null) return fromTitle
+            return yearRegex.find(item.description)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+        }
+
         when (selectedSort) {
-            VodSortOption.RATING -> filtered.sortedByDescending {
-                (it.rating.ifBlank { it.ratingKp.ifBlank { it.ratingImdb } }).toDoubleOrNull() ?: 0.0
-            }
-            VodSortOption.YEAR -> filtered.sortedByDescending {
-                it.year.toIntOrNull() ?: 0
-            }
+            VodSortOption.RATING -> filtered.sortedWith(
+                compareByDescending<VodMovieItem> { parseRatingValue(it) }
+                    .thenByDescending { parseYearValue(it) }
+            )
+            VodSortOption.YEAR -> filtered.sortedWith(
+                compareByDescending<VodMovieItem> { parseYearValue(it) }
+                    .thenByDescending { parseRatingValue(it) }
+            )
             VodSortOption.TITLE -> filtered.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
-            VodSortOption.ADDED -> filtered
+            VodSortOption.ADDED -> {
+                if (filtered.any { it.addedAt > 0L }) {
+                    filtered.sortedByDescending { it.addedAt }
+                } else {
+                    filtered
+                }
+            }
         }
     }
 
@@ -530,34 +639,37 @@ fun VodLibraryScreen(
             prefs = prefs,
             onToggleFavorite = { toggleFavorite(activeItem.id) },
             onStepEpisode = { delta ->
-                if (activeItem.episodes.isNotEmpty()) {
-                    val curEp = if (playingEpisodeIdx >= 0) playingEpisodeIdx else 0
-                    val nextEpIdx = (curEp + delta).coerceIn(0, activeItem.episodes.lastIndex)
-                    if (nextEpIdx != curEp) {
-                        val ep = activeItem.episodes[nextEpIdx]
-                        val savedEpSec = prefs.getLong("vod_pos_${activeItem.id}_ep_$nextEpIdx", 0L)
-                        recordHistoryAndPlay(
-                            item = activeItem,
-                            streamUrl = ep.streamUrl,
-                            displayTitle = "${activeItem.title} — ${ep.title}",
-                            epRequestJson = ep.requestJson,
-                            epIdx = nextEpIdx,
-                            resumeSec = savedEpSec,
-                        )
-                    }
-                } else if (filteredItems.size > 1) {
-                    val curMovieIdx = filteredItems.indexOfFirst { it.id == activeItem.id }
-                    if (curMovieIdx >= 0) {
-                        val nextMovieIdx = (curMovieIdx + delta + filteredItems.size) % filteredItems.size
-                        val nextMovie = filteredItems[nextMovieIdx]
+                val curItem = playingItem ?: activeItem
+                if (curItem.episodes.size > 1) {
+                    val epCount = curItem.episodes.size
+                    val curEp = if (playingEpisodeIdx in 0 until epCount) playingEpisodeIdx else 0
+                    val nextEpIdx = (curEp + delta + epCount) % epCount
+                    val ep = curItem.episodes[nextEpIdx]
+                    val savedEpSec = prefs.getLong("vod_pos_${curItem.id}_ep_$nextEpIdx", 0L)
+                    recordHistoryAndPlay(
+                        item = curItem,
+                        streamUrl = ep.streamUrl,
+                        displayTitle = "${curItem.title} — ${ep.title}",
+                        epRequestJson = ep.requestJson.ifBlank { curItem.requestJson },
+                        epIdx = nextEpIdx,
+                        resumeSec = savedEpSec,
+                    )
+                } else {
+                    val pool = if (filteredItems.size > 1) filteredItems else allItems
+                    if (pool.size > 1) {
+                        val curMovieIdx = pool.indexOfFirst { it.id == curItem.id }.let { if (it >= 0) it else 0 }
+                        val nextMovieIdx = (curMovieIdx + delta + pool.size) % pool.size
+                        val nextMovie = pool[nextMovieIdx]
                         val savedMovieSec = prefs.getLong("vod_pos_${nextMovie.id}", 0L)
                         val url = nextMovie.streamUrl.ifBlank { nextMovie.episodes.firstOrNull()?.streamUrl.orEmpty() }
+                        val reqJson = nextMovie.episodes.firstOrNull()?.requestJson?.ifBlank { nextMovie.requestJson }
+                            ?: nextMovie.requestJson
                         recordHistoryAndPlay(
                             item = nextMovie,
                             streamUrl = url,
                             displayTitle = nextMovie.title,
-                            epRequestJson = nextMovie.requestJson,
-                            epIdx = if (nextMovie.episodes.isNotEmpty()) 0 else -1,
+                            epRequestJson = reqJson,
+                            epIdx = if (nextMovie.episodes.size > 1) 0 else -1,
                             resumeSec = savedMovieSec,
                         )
                     }
@@ -592,13 +704,14 @@ fun VodLibraryScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(VodSurface1)
-                .padding(horizontal = 14.dp, vertical = 6.dp),
+                .then(if (isPortrait) Modifier.horizontalScroll(rememberScrollState()) else Modifier)
+                .padding(horizontal = if (isPortrait) 10.dp else 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = if (isPortrait) Arrangement.spacedBy(8.dp) else Arrangement.SpaceBetween,
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(if (isPortrait) 6.dp else 10.dp),
             ) {
                 VodFocusableActionChip(
                     label = "← ТВ",
@@ -670,28 +783,49 @@ fun VodLibraryScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(VodSurface1.copy(alpha = 0.7f))
-                .padding(horizontal = 14.dp, vertical = 5.dp),
+                .padding(horizontal = if (isPortrait) 10.dp else 14.dp, vertical = 5.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            // Render category chips in 1-2 compact rows without horizontal scrolling
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                categoryTabs.chunked(7).forEach { rowTabs ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        rowTabs.forEach { tab ->
-                            VodFocusableActionChip(
-                                label = tab.title,
-                                isActive = selectedCategory == tab.id,
-                                onClick = {
-                                    selectedGenre = "all"
-                                    selectedYear = "all"
-                                    searchQuery = ""
-                                    selectedCategory = tab.id
-                                },
-                            )
+            if (isPortrait) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    items(categoryTabs) { tab ->
+                        VodFocusableActionChip(
+                            label = tab.title,
+                            isActive = selectedCategory == tab.id,
+                            onClick = {
+                                selectedGenre = "all"
+                                selectedYear = "all"
+                                searchQuery = ""
+                                selectedCategory = tab.id
+                            },
+                        )
+                    }
+                }
+            } else {
+                // Render category chips in 1-2 compact rows without horizontal scrolling
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    categoryTabs.chunked(7).forEach { rowTabs ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            rowTabs.forEach { tab ->
+                                VodFocusableActionChip(
+                                    label = tab.title,
+                                    isActive = selectedCategory == tab.id,
+                                    onClick = {
+                                        selectedGenre = "all"
+                                        selectedYear = "all"
+                                        searchQuery = ""
+                                        selectedCategory = tab.id
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -704,7 +838,9 @@ fun VodLibraryScreen(
                 selectedSort != VodSortOption.ADDED || searchQuery.isNotBlank()
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (isPortrait) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -790,10 +926,13 @@ fun VodLibraryScreen(
                         selectedYear = "all"
                         selectedSort = VodSortOption.ADDED
                         searchQuery = ""
+                        runCatching { firstPosterFocusRequester.requestFocus() }
                     },
                 )
 
-                Spacer(modifier = Modifier.weight(1f))
+                if (!isPortrait) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
 
                 Box {
                     VodFocusableActionChip(
@@ -835,18 +974,19 @@ fun VodLibraryScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 4.dp),
+                .padding(horizontal = if (isPortrait) 10.dp else 14.dp, vertical = 4.dp),
         ) {
             when {
                 !hasPortalConfig -> {
                     Column(
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .width(560.dp)
+                            .widthIn(max = 560.dp)
+                            .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
                             .background(VodSurface1)
                             .border(1.5.dp, VodCyan.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
-                            .padding(24.dp),
+                            .padding(if (isPortrait) 16.dp else 24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -864,19 +1004,37 @@ fun VodLibraryScreen(
                             fontSize = 13.sp,
                             textAlign = TextAlign.Center,
                         )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            VodFocusableActionChip(
-                                label = "⚙ Ввести данные портала на ТВ",
-                                isActive = true,
-                                onClick = { showPortalDialog = true },
-                            )
-                            VodFocusableActionChip(
-                                label = "🌐 Открыть Настройки (Код с сайта)",
-                                isActive = false,
-                                onClick = onOpenSettingsClick,
-                            )
+                        if (isPortrait) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                VodFocusableActionChip(
+                                    label = "⚙ Ввести данные портала",
+                                    isActive = true,
+                                    onClick = { showPortalDialog = true },
+                                )
+                                VodFocusableActionChip(
+                                    label = "🌐 Открыть Настройки (Код с сайта)",
+                                    isActive = false,
+                                    onClick = onOpenSettingsClick,
+                                )
+                            }
+                        } else {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                VodFocusableActionChip(
+                                    label = "⚙ Ввести данные портала на ТВ",
+                                    isActive = true,
+                                    onClick = { showPortalDialog = true },
+                                )
+                                VodFocusableActionChip(
+                                    label = "🌐 Открыть Настройки (Код с сайта)",
+                                    isActive = false,
+                                    onClick = onOpenSettingsClick,
+                                )
+                            }
                         }
                     }
                 }
@@ -901,11 +1059,12 @@ fun VodLibraryScreen(
                     Column(
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .width(520.dp)
+                            .widthIn(max = 520.dp)
+                            .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
                             .background(VodSurface1)
                             .border(1.5.dp, VodDanger.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                            .padding(24.dp),
+                            .padding(if (isPortrait) 16.dp else 24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
@@ -913,7 +1072,7 @@ fun VodLibraryScreen(
                         Text(errorMessage.orEmpty(), color = Color(0xFFFCA5A5), fontSize = 13.sp, textAlign = TextAlign.Center)
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             VodFocusableActionChip(
-                                label = "⚙ Изменить параметры доступа",
+                                label = "⚙ Изменить параметры",
                                 isActive = true,
                                 onClick = { showPortalDialog = true },
                             )
@@ -938,7 +1097,8 @@ fun VodLibraryScreen(
 
                 else -> {
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(7),
+                        state = gridState,
+                        columns = GridCells.Fixed(if (isPortrait) 3 else 7),
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -961,6 +1121,7 @@ fun VodLibraryScreen(
                                 isFavorite = favorites.contains(movie.id),
                                 onClick = { detailsItem = movie },
                                 onToggleFavorite = { toggleFavorite(movie.id) },
+                                modifier = if (index == 0) Modifier.focusRequester(firstPosterFocusRequester) else Modifier,
                             )
                         }
                     }
@@ -969,15 +1130,17 @@ fun VodLibraryScreen(
         }
 
         // ── Bottom Remote Control Hint Bar ─────────────────────────────────
-        RemoteControlHintBar(
-            hints = listOf(
-                RemoteHint("◄▲▼►", "Навигация"),
-                RemoteHint("OK", "Карточка фильма / Смотреть"),
-                RemoteHint("🔍 Поиск", "Найти фильм", onClick = { showSearchDialog = true }),
-                RemoteHint("⚙ Портал", "Настройки доступа", onClick = { showPortalDialog = true }),
-                RemoteHint("Назад", "К папкам", onClick = onBackClick),
-            ),
-        )
+        if (!isPortrait) {
+            RemoteControlHintBar(
+                hints = listOf(
+                    RemoteHint("◄▲▼►", "Навигация"),
+                    RemoteHint("OK", "Карточка фильма / Смотреть"),
+                    RemoteHint("🔍 Поиск", "Найти фильм", onClick = { showSearchDialog = true }),
+                    RemoteHint("⚙ Портал", "Настройки доступа", onClick = { showPortalDialog = true }),
+                    RemoteHint("Назад", "К папкам", onClick = onBackClick),
+                ),
+            )
+        }
     }
 
     // ── Movie Details Modal ────────────────────────────────────────────────
@@ -993,6 +1156,8 @@ fun VodLibraryScreen(
         VodDetailsDialog(
             item = item,
             isFavorite = favorites.contains(item.id),
+            isLoadingEpisodes = isLoadingDetailsEpisodes,
+            isPortrait = isPortrait,
             savedPositionSec = savedSec,
             lastWatchedEpisodeIdx = lastEpIdx,
             watchedEpisodeIndices = watchedEps,
@@ -1003,28 +1168,34 @@ fun VodLibraryScreen(
                         item = item,
                         streamUrl = ep.streamUrl,
                         displayTitle = "${item.title} — ${ep.title}",
-                        epRequestJson = ep.requestJson,
+                        epRequestJson = ep.requestJson.ifBlank { item.requestJson },
                         epIdx = lastEpIdx,
                         resumeSec = savedSec,
                     )
                 } else {
-                    val url = item.streamUrl.ifBlank { item.episodes.firstOrNull()?.streamUrl.orEmpty() }
+                    val ep0 = item.episodes.firstOrNull()
+                    val url = item.streamUrl.ifBlank { ep0?.streamUrl.orEmpty() }
+                    val reqJson = ep0?.requestJson?.ifBlank { item.requestJson } ?: item.requestJson
                     recordHistoryAndPlay(
                         item = item,
                         streamUrl = url,
-                        displayTitle = item.title,
-                        epIdx = if (item.episodes.isNotEmpty()) 0 else -1,
+                        displayTitle = if (ep0 != null && item.episodes.size > 1) "${item.title} — ${ep0.title}" else item.title,
+                        epRequestJson = reqJson,
+                        epIdx = if (item.episodes.size > 1) 0 else -1,
                         resumeSec = savedSec,
                     )
                 }
             },
             onPlayMain = {
-                val url = item.streamUrl.ifBlank { item.episodes.firstOrNull()?.streamUrl.orEmpty() }
+                val ep0 = item.episodes.firstOrNull()
+                val url = item.streamUrl.ifBlank { ep0?.streamUrl.orEmpty() }
+                val reqJson = ep0?.requestJson?.ifBlank { item.requestJson } ?: item.requestJson
                 recordHistoryAndPlay(
                     item = item,
                     streamUrl = url,
-                    displayTitle = item.title,
-                    epIdx = if (item.episodes.isNotEmpty()) 0 else -1,
+                    displayTitle = if (ep0 != null && item.episodes.size > 1) "${item.title} — ${ep0.title}" else item.title,
+                    epRequestJson = reqJson,
+                    epIdx = if (item.episodes.size > 1) 0 else -1,
                     resumeSec = 0L,
                 )
             },
@@ -1034,7 +1205,7 @@ fun VodLibraryScreen(
                     item = item,
                     streamUrl = ep.streamUrl,
                     displayTitle = "${item.title} — ${ep.title}",
-                    epRequestJson = ep.requestJson,
+                    epRequestJson = ep.requestJson.ifBlank { item.requestJson },
                     epIdx = epIdx,
                     resumeSec = epSavedSec,
                 )
@@ -1097,11 +1268,13 @@ fun VodLibraryScreen(
         ) {
             Column(
                 modifier = Modifier
-                    .width(640.dp)
+                    .padding(horizontal = if (isPortrait) 12.dp else 32.dp)
+                    .widthIn(max = 640.dp)
+                    .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(VodSurface1)
                     .border(1.5.dp, VodCyan.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                    .padding(18.dp),
+                    .padding(if (isPortrait) 14.dp else 18.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Row(
@@ -1217,9 +1390,13 @@ private fun VodFocusableActionChip(
     isActive: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isFavoriteGold: Boolean = false,
+    isFocusedOverride: Boolean = false,
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (isFocused) 1.05f else 1.0f, tween(120), label = "vod_chip_scale")
+    val effectiveFocused = isFocused || isFocusedOverride
+    val scale by animateFloatAsState(if (effectiveFocused) 1.07f else 1.0f, tween(120), label = "vod_chip_scale")
+    val accentColor = if (isFavoriteGold) VodGold else VodCyan
 
     Box(
         modifier = modifier
@@ -1227,16 +1404,17 @@ private fun VodFocusableActionChip(
             .clip(RoundedCornerShape(8.dp))
             .background(
                 when {
-                    isFocused -> VodCyan.copy(alpha = 0.28f)
-                    isActive -> VodCyan.copy(alpha = 0.16f)
+                    effectiveFocused -> VodGold
+                    isActive && isFavoriteGold -> VodGold.copy(alpha = 0.24f)
+                    isActive -> accentColor.copy(alpha = 0.22f)
                     else -> VodSurface2
                 }
             )
             .border(
-                width = if (isFocused) 2.dp else 1.dp,
+                width = if (effectiveFocused) 2.5.dp else if (isActive && isFavoriteGold) 1.8.dp else 1.dp,
                 color = when {
-                    isFocused -> VodCyan
-                    isActive -> VodCyan.copy(alpha = 0.65f)
+                    effectiveFocused -> Color.White
+                    isActive -> accentColor.copy(alpha = if (isFavoriteGold) 0.9f else 0.7f)
                     else -> Color(0x22FFFFFF)
                 },
                 shape = RoundedCornerShape(8.dp),
@@ -1250,12 +1428,13 @@ private fun VodFocusableActionChip(
         Text(
             text = label,
             color = when {
-                isFocused -> Color.White
+                effectiveFocused -> Color.Black
+                isActive && isFavoriteGold -> VodGold
                 isActive -> VodCyan
                 else -> VodTextPrim
             },
             fontSize = 12.sp,
-            fontWeight = if (isFocused || isActive) FontWeight.Bold else FontWeight.Medium,
+            fontWeight = if (effectiveFocused) FontWeight.ExtraBold else if (isActive) FontWeight.Bold else FontWeight.Medium,
             maxLines = 1,
         )
     }
@@ -1267,6 +1446,7 @@ private fun VodPosterCard(
     isFavorite: Boolean,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (isFocused) 1.04f else 1.0f, tween(140), label = "poster_scale")
@@ -1278,7 +1458,7 @@ private fun VodPosterCard(
     ).joinToString(" • ").ifBlank { "Фильм" }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .scale(scale)
             .clip(RoundedCornerShape(10.dp))
@@ -1416,6 +1596,8 @@ private fun VodPosterCard(
 private fun VodDetailsDialog(
     item: VodMovieItem,
     isFavorite: Boolean,
+    isLoadingEpisodes: Boolean = false,
+    isPortrait: Boolean = false,
     savedPositionSec: Long,
     lastWatchedEpisodeIdx: Int,
     watchedEpisodeIndices: Set<String>,
@@ -1425,8 +1607,10 @@ private fun VodDetailsDialog(
     onToggleFavorite: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val hasResume = (item.episodes.isNotEmpty() && lastWatchedEpisodeIdx in item.episodes.indices) || savedPositionSec > 10L
-    val resumeLabel = if (item.episodes.isNotEmpty() && lastWatchedEpisodeIdx in item.episodes.indices) {
+    val showEpisodesSection = item.episodes.size > 1 ||
+        (item.episodes.size == 1 && (item.type == "series" || item.category.contains("сериал", ignoreCase = true)))
+    val hasResume = (showEpisodesSection && lastWatchedEpisodeIdx in item.episodes.indices) || savedPositionSec > 10L
+    val resumeLabel = if (showEpisodesSection && lastWatchedEpisodeIdx in item.episodes.indices) {
         val epTitle = item.episodes[lastWatchedEpisodeIdx].title
         if (savedPositionSec > 10L) {
             "▶ Продолжить просмотр: $epTitle (${formatDurationSec(savedPositionSec)})"
@@ -1552,7 +1736,7 @@ private fun VodDetailsDialog(
                         color = Color(0xFFCBD5E1),
                         fontSize = 13.sp,
                         lineHeight = 18.sp,
-                        maxLines = 4,
+                        maxLines = if (showEpisodesSection || isLoadingEpisodes) 2 else 4,
                         overflow = TextOverflow.Ellipsis,
                     )
 
@@ -1575,7 +1759,27 @@ private fun VodDetailsDialog(
                         )
                     }
 
+                    val primaryActionFocusRequester = remember { FocusRequester() }
+                    val firstEpisodeFocusRequester = remember { FocusRequester() }
+
+                    LaunchedEffect(item.id) {
+                        delay(80L)
+                        runCatching { primaryActionFocusRequester.requestFocus() }
+                    }
+
                     Spacer(Modifier.height(2.dp))
+
+                    val downToEpisodesModifier = Modifier.onPreviewKeyEvent { ev ->
+                        if (ev.type == KeyEventType.KeyDown &&
+                            ev.key == Key.DirectionDown &&
+                            showEpisodesSection
+                        ) {
+                            runCatching { firstEpisodeFocusRequester.requestFocus() }
+                            true
+                        } else {
+                            false
+                        }
+                    }
 
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1586,26 +1790,44 @@ private fun VodDetailsDialog(
                                 label = resumeLabel,
                                 isActive = true,
                                 onClick = onResumePlayback,
+                                modifier = downToEpisodesModifier.focusRequester(primaryActionFocusRequester),
                             )
                         }
                         VodFocusableActionChip(
                             label = playStartLabel,
                             isActive = !hasResume,
                             onClick = onPlayMain,
+                            modifier = if (!hasResume) {
+                                downToEpisodesModifier.focusRequester(primaryActionFocusRequester)
+                            } else {
+                                downToEpisodesModifier
+                            },
                         )
                         VodFocusableActionChip(
-                            label = if (isFavorite) "⭐ В избранном" else "☆ В избранное",
+                            label = if (isFavorite) "★ В избранном" else "☆ В избранное",
                             isActive = isFavorite,
+                            isFavoriteGold = isFavorite,
                             onClick = onToggleFavorite,
+                            modifier = downToEpisodesModifier,
                         )
                         VodFocusableActionChip(
                             label = "← Закрыть",
                             isActive = false,
                             onClick = onDismiss,
+                            modifier = downToEpisodesModifier,
                         )
                     }
 
-                    if (item.episodes.isNotEmpty()) {
+                    if (isLoadingEpisodes && !showEpisodesSection) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "⏳ Загрузка списка серий с портала…",
+                            color = VodCyan,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    } else if (showEpisodesSection) {
+                        val colsCount = if (isPortrait) 2 else 5
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = "📺 Серии (${item.episodes.size}) — переходите ◄ ► ▲ ▼:",
@@ -1614,21 +1836,32 @@ private fun VodDetailsDialog(
                             fontWeight = FontWeight.Bold,
                         )
                         LazyVerticalGrid(
-                            columns = GridCells.Fixed(5),
+                            columns = GridCells.Fixed(colsCount),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = 150.dp),
+                                .heightIn(max = 175.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            itemsIndexed(item.episodes.take(120), key = { _, ep -> ep.id }) { epIdx, ep ->
+                            itemsIndexed(item.episodes.take(200), key = { _, ep -> ep.id }) { epIdx, ep ->
                                 val isWatched = watchedEpisodeIndices.contains(epIdx.toString()) || epIdx == lastWatchedEpisodeIdx
                                 val isLastWatched = epIdx == lastWatchedEpisodeIdx
                                 val prefix = if (isWatched) "✓ " else "▶ "
+                                val epModifier = Modifier
+                                    .let { mod -> if (epIdx == 0) mod.focusRequester(firstEpisodeFocusRequester) else mod }
+                                    .onPreviewKeyEvent { ev ->
+                                        if (ev.type == KeyEventType.KeyDown && ev.key == Key.DirectionUp && epIdx < colsCount) {
+                                            runCatching { primaryActionFocusRequester.requestFocus() }
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
                                 VodFocusableActionChip(
                                     label = "$prefix${ep.title}",
                                     isActive = isLastWatched,
                                     onClick = { onPlayEpisode(epIdx, ep) },
+                                    modifier = epModifier,
                                 )
                             }
                         }
@@ -1656,48 +1889,109 @@ private fun VodFullscreenPlayerOverlay(
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val screenKeyDispatcher = LocalScreenKeyDispatcher.current
+    val rootFocusRequester = remember { FocusRequester() }
+    val currentOnToggleFavorite by rememberUpdatedState(onToggleFavorite)
+    val currentOnStepEpisode by rememberUpdatedState(onStepEpisode)
+    val currentOnClose by rememberUpdatedState(onClose)
+    val currentItem by rememberUpdatedState(item)
+    val currentEpisodeIdx by rememberUpdatedState(episodeIdx)
+    val currentStreamUrl by rememberUpdatedState(streamUrl)
+
     var osdVisible by remember { mutableStateOf(true) }
-    var positionMs by remember { mutableLongStateOf(0L) }
+    var osdInteractionTick by remember { mutableIntStateOf(0) }
+    var focusedControlIndex by remember { mutableIntStateOf(2) } // 2 = Play/Pause
+    var positionMs by remember { mutableLongStateOf(if (initialSeekSec > 5L) initialSeekSec * 1000L else 0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var isPlaying by remember { mutableStateOf(true) }
+    var pendingSeekMs by remember {
+        mutableLongStateOf(if (initialSeekSec > 5L) initialSeekSec * 1000L else 0L)
+    }
+    var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
 
     fun saveProgressSec(sec: Long) {
         if (sec <= 10L) return
-        val editor = prefs.edit().putLong("vod_pos_${item.id}", sec)
-        if (episodeIdx >= 0) {
-            editor.putLong("vod_pos_${item.id}_ep_$episodeIdx", sec)
-            editor.putInt("vod_last_ep_idx_${item.id}", episodeIdx)
+        val activeItemId = currentItem.id
+        val activeEpIdx = currentEpisodeIdx
+        val editor = prefs.edit().putLong("vod_pos_$activeItemId", sec)
+        if (activeEpIdx >= 0) {
+            editor.putLong("vod_pos_${activeItemId}_ep_$activeEpIdx", sec)
+            editor.putInt("vod_last_ep_idx_$activeItemId", activeEpIdx)
         }
         editor.apply()
     }
 
-    val exoPlayer = remember(streamUrl) {
+    val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
-            val mediaItem = MediaItem.fromUri(Uri.parse(streamUrl))
-            setMediaItem(mediaItem)
-            prepare()
-            val savedSec = if (initialSeekSec > 10L) {
-                initialSeekSec
-            } else if (episodeIdx >= 0) {
-                prefs.getLong("vod_pos_${item.id}_ep_$episodeIdx", 0L)
-            } else {
-                prefs.getLong("vod_pos_${item.id}", 0L)
-            }
-            if (savedSec > 10L) {
-                seekTo(savedSec * 1000L)
-            }
             playWhenReady = true
         }
     }
 
-    DisposableEffect(exoPlayer) {
+    LaunchedEffect(streamUrl, item.id, episodeIdx) {
+        if (streamUrl.isNotBlank()) {
+            val seekMs = if (initialSeekSec > 5L) initialSeekSec * 1000L else 0L
+            pendingSeekMs = seekMs
+            positionMs = seekMs
+            durationMs = 0L
+            isPlaying = true
+            osdVisible = true
+            osdInteractionTick++
+            exoPlayer.stop()
+            exoPlayer.clearMediaItems()
+            exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(streamUrl)))
+            exoPlayer.prepare()
+            if (seekMs > 0L) {
+                exoPlayer.seekTo(seekMs)
+            }
+            exoPlayer.playWhenReady = true
+            exoPlayer.play()
+        }
+    }
+
+    DisposableEffect(exoPlayer, lifecycleOwner) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
             }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY && pendingSeekMs > 0L) {
+                    val targetMs = pendingSeekMs
+                    pendingSeekMs = 0L
+                    exoPlayer.seekTo(targetMs)
+                    positionMs = targetMs
+                }
+            }
+        }
+        val lifecycleObserver = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    val posSec = exoPlayer.currentPosition / 1000L
+                    saveProgressSec(posSec)
+                    pendingSeekMs = exoPlayer.currentPosition.coerceAtLeast(0L)
+                    exoPlayer.stop()
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if ( (exoPlayer.playbackState == Player.STATE_IDLE || exoPlayer.playbackState == Player.STATE_ENDED) &&
+                        currentStreamUrl.isNotBlank()
+                    ) {
+                        exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(currentStreamUrl)))
+                        exoPlayer.prepare()
+                        if (pendingSeekMs > 0L) {
+                            exoPlayer.seekTo(pendingSeekMs)
+                        }
+                        exoPlayer.play()
+                    }
+                    runCatching { rootFocusRequester.requestFocus() }
+                }
+                else -> Unit
+            }
         }
         exoPlayer.addListener(listener)
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
             val posSec = exoPlayer.currentPosition / 1000L
             saveProgressSec(posSec)
             exoPlayer.removeListener(listener)
@@ -1707,87 +2001,219 @@ private fun VodFullscreenPlayerOverlay(
 
     LaunchedEffect(exoPlayer) {
         while (isActive) {
-            positionMs = exoPlayer.currentPosition.coerceAtLeast(0L)
+            if (pendingSeekMs <= 0L) {
+                positionMs = exoPlayer.currentPosition.coerceAtLeast(0L)
+            }
             durationMs = exoPlayer.duration.coerceAtLeast(0L)
-            if (positionMs > 12_000L) {
+            if (positionMs > 12_000L && pendingSeekMs <= 0L) {
                 saveProgressSec(positionMs / 1000L)
             }
             delay(1000L)
         }
     }
 
-    LaunchedEffect(osdVisible) {
+    LaunchedEffect(osdVisible, osdInteractionTick) {
         if (osdVisible) {
             delay(5000L)
             osdVisible = false
         }
     }
 
+    val triggerControlAction: (Int) -> Unit = { idx ->
+        focusedControlIndex = idx.coerceIn(0, 7)
+        osdVisible = true
+        osdInteractionTick++
+        when (idx) {
+            0 -> currentOnStepEpisode(-1)
+            1 -> {
+                val next = (exoPlayer.currentPosition - 30_000L).coerceAtLeast(0L)
+                exoPlayer.seekTo(next)
+                positionMs = next
+            }
+            2 -> {
+                if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+            }
+            3 -> {
+                val dur = exoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                val next = (exoPlayer.currentPosition + 30_000L).coerceAtMost(dur)
+                exoPlayer.seekTo(next)
+                positionMs = next
+            }
+            4 -> currentOnStepEpisode(1)
+            5 -> currentOnToggleFavorite()
+            6 -> {
+                resizeMode = when (resizeMode) {
+                    AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                    else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                }
+            }
+            7 -> currentOnClose()
+        }
+    }
+
+    val handleVodPlayerKey by rememberUpdatedState { nativeEvent: KeyEvent ->
+        when (nativeEvent.action) {
+            KeyEvent.ACTION_DOWN -> {
+                when (nativeEvent.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        if (!osdVisible) {
+                            osdVisible = true
+                            focusedControlIndex = 2
+                            osdInteractionTick++
+                        } else {
+                            triggerControlAction(focusedControlIndex)
+                        }
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        osdInteractionTick++
+                        if (osdVisible) {
+                            focusedControlIndex = if (focusedControlIndex - 1 < 0) 7 else focusedControlIndex - 1
+                        } else {
+                            osdVisible = true
+                            focusedControlIndex = 1
+                            val next = (exoPlayer.currentPosition - 30_000L).coerceAtLeast(0L)
+                            exoPlayer.seekTo(next)
+                            positionMs = next
+                        }
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        osdInteractionTick++
+                        if (osdVisible) {
+                            focusedControlIndex = (focusedControlIndex + 1) % 8
+                        } else {
+                            osdVisible = true
+                            focusedControlIndex = 3
+                            val dur = exoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
+                            val next = (exoPlayer.currentPosition + 30_000L).coerceAtMost(dur)
+                            exoPlayer.seekTo(next)
+                            positionMs = next
+                        }
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_UP,
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        osdInteractionTick++
+                        if (!osdVisible) {
+                            osdVisible = true
+                            focusedControlIndex = 2
+                        }
+                        true
+                    }
+                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                    KeyEvent.KEYCODE_MEDIA_PLAY,
+                    KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                        triggerControlAction(2)
+                        true
+                    }
+                    KeyEvent.KEYCODE_MEDIA_REWIND,
+                    KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD -> {
+                        triggerControlAction(1)
+                        true
+                    }
+                    KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+                    KeyEvent.KEYCODE_MEDIA_STEP_FORWARD -> {
+                        triggerControlAction(3)
+                        true
+                    }
+                    KeyEvent.KEYCODE_PAGE_UP,
+                    KeyEvent.KEYCODE_CHANNEL_UP -> {
+                        triggerControlAction(0)
+                        true
+                    }
+                    KeyEvent.KEYCODE_PAGE_DOWN,
+                    KeyEvent.KEYCODE_CHANNEL_DOWN -> {
+                        triggerControlAction(4)
+                        true
+                    }
+                    KeyEvent.KEYCODE_PROG_RED -> {
+                        triggerControlAction(5)
+                        true
+                    }
+                    KeyEvent.KEYCODE_BACK,
+                    KeyEvent.KEYCODE_ESCAPE -> true
+                    else -> false
+                }
+            }
+            KeyEvent.ACTION_UP -> {
+                if (nativeEvent.keyCode == KeyEvent.KEYCODE_BACK || nativeEvent.keyCode == KeyEvent.KEYCODE_ESCAPE) {
+                    if (!nativeEvent.isCanceled) {
+                        currentOnClose()
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            else -> false
+        }
+    }
+
+    DisposableEffect(screenKeyDispatcher, lifecycleOwner) {
+        val previousHandler = screenKeyDispatcher?.activeHandler
+        val handler: (KeyEvent) -> Boolean = { ev -> handleVodPlayerKey(ev) }
+        screenKeyDispatcher?.activeHandler = handler
+        val resumeObserver = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                screenKeyDispatcher?.activeHandler = handler
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(resumeObserver)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(resumeObserver)
+            if (screenKeyDispatcher?.activeHandler === handler) {
+                screenKeyDispatcher.activeHandler = previousHandler
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        delay(50L)
+        runCatching { rootFocusRequester.requestFocus() }
+    }
+
     BackHandler {
-        onClose()
+        currentOnClose()
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(rootFocusRequester)
             .focusable()
             .onPreviewKeyEvent { ev ->
-                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                osdVisible = true
-                when (ev.key) {
-                    Key.MediaRewind -> {
-                        val next = (exoPlayer.currentPosition - 30_000L).coerceAtLeast(0L)
-                        exoPlayer.seekTo(next)
-                        positionMs = next
-                        true
-                    }
-                    Key.MediaFastForward -> {
-                        val dur = exoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
-                        val next = (exoPlayer.currentPosition + 30_000L).coerceAtMost(dur)
-                        exoPlayer.seekTo(next)
-                        positionMs = next
-                        true
-                    }
-                    Key.MediaPlayPause -> {
-                        if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
-                        true
-                    }
-                    Key.PageUp, Key.ChannelUp -> {
-                        onStepEpisode(-1)
-                        true
-                    }
-                    Key.PageDown, Key.ChannelDown -> {
-                        onStepEpisode(1)
-                        true
-                    }
-                    Key.Back, Key.Escape -> {
-                        onClose()
-                        true
-                    }
-                    else -> {
-                        if (ev.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_PROG_RED) {
-                            onToggleFavorite()
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                }
+                handleVodPlayerKey(ev.nativeKeyEvent)
             }
-            .clickable { osdVisible = !osdVisible },
+            .clickable {
+                osdVisible = !osdVisible
+                if (osdVisible) {
+                    focusedControlIndex = 2
+                    osdInteractionTick++
+                }
+            },
     ) {
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = exoPlayer
                     useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    this.resizeMode = resizeMode
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                 }
+            },
+            update = { view ->
+                if (view.player !== exoPlayer) {
+                    view.player = exoPlayer
+                }
+                view.resizeMode = resizeMode
             },
             modifier = Modifier.fillMaxSize(),
         )
@@ -1814,7 +2240,7 @@ private fun VodFullscreenPlayerOverlay(
                     VodFocusableActionChip(
                         label = "← Назад",
                         isActive = false,
-                        onClick = onClose,
+                        onClick = currentOnClose,
                     )
                     Text(
                         text = displayTitle,
@@ -1878,7 +2304,7 @@ private fun VodFullscreenPlayerOverlay(
                         fontWeight = FontWeight.Bold,
                     )
                 }
-                val progress = if (durationMs > 0L) {
+                val progress = if (durationMs > 0L && pendingSeekMs <= 0L) {
                     (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
                 } else 0f
                 LinearProgressIndicator(
@@ -1891,52 +2317,65 @@ private fun VodFullscreenPlayerOverlay(
                     trackColor = Color(0x33FFFFFF),
                 )
 
-                // Interactive Control Bar: Prev, -30s, Play/Pause, +30s, Next, Favorite
+                // Interactive Control Bar: Prev, -30s, Play/Pause, +30s, Next, Favorite, Aspect, Close
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     VodFocusableActionChip(
-                        label = if (item.episodes.isNotEmpty()) "⏮ Пред. серия" else "⏮ Пред.",
+                        label = if (item.episodes.size > 1) "⏮ Пред. серия" else "⏮ Пред.",
                         isActive = false,
-                        onClick = { onStepEpisode(-1) },
+                        isFocusedOverride = focusedControlIndex == 0,
+                        onClick = { triggerControlAction(0) },
                     )
                     VodFocusableActionChip(
                         label = "⏪ -30с",
                         isActive = false,
-                        onClick = {
-                            val next = (exoPlayer.currentPosition - 30_000L).coerceAtLeast(0L)
-                            exoPlayer.seekTo(next)
-                            positionMs = next
-                        },
+                        isFocusedOverride = focusedControlIndex == 1,
+                        onClick = { triggerControlAction(1) },
                     )
                     VodFocusableActionChip(
                         label = if (isPlaying) "⏸ Пауза" else "▶ Пуск",
                         isActive = true,
-                        onClick = {
-                            if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
-                        },
+                        isFocusedOverride = focusedControlIndex == 2,
+                        onClick = { triggerControlAction(2) },
                     )
                     VodFocusableActionChip(
                         label = "⏩ +30с",
                         isActive = false,
-                        onClick = {
-                            val dur = exoPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
-                            val next = (exoPlayer.currentPosition + 30_000L).coerceAtMost(dur)
-                            exoPlayer.seekTo(next)
-                            positionMs = next
-                        },
+                        isFocusedOverride = focusedControlIndex == 3,
+                        onClick = { triggerControlAction(3) },
                     )
                     VodFocusableActionChip(
-                        label = if (item.episodes.isNotEmpty()) "⏭ След. серия" else "⏭ След.",
+                        label = if (item.episodes.size > 1) "⏭ След. серия" else "⏭ След.",
                         isActive = false,
-                        onClick = { onStepEpisode(1) },
+                        isFocusedOverride = focusedControlIndex == 4,
+                        onClick = { triggerControlAction(4) },
                     )
                     VodFocusableActionChip(
-                        label = if (isFavorite) "⭐ В избранном" else "☆ В избранное",
+                        label = if (isFavorite) "★ В избранном" else "☆ В избранное",
                         isActive = isFavorite,
-                        onClick = onToggleFavorite,
+                        isFavoriteGold = isFavorite,
+                        isFocusedOverride = focusedControlIndex == 5,
+                        onClick = { triggerControlAction(5) },
+                    )
+                    val resizeLabel = when (resizeMode) {
+                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "📐 Увеличение"
+                        AspectRatioFrameLayout.RESIZE_MODE_FILL -> "📐 Растянуть"
+                        else -> "📐 Авто"
+                    }
+                    VodFocusableActionChip(
+                        label = resizeLabel,
+                        isActive = false,
+                        isFocusedOverride = focusedControlIndex == 6,
+                        onClick = { triggerControlAction(6) },
+                    )
+                    VodFocusableActionChip(
+                        label = "✕ Закрыть",
+                        isActive = false,
+                        isFocusedOverride = focusedControlIndex == 7,
+                        onClick = { triggerControlAction(7) },
                     )
                 }
             }
@@ -1957,6 +2396,62 @@ private fun formatDurationSec(totalSec: Long): String {
 }
 
 // ─── Network Fetcher via Unified /api/tv/vod Endpoint ─────────────────────────
+
+private val VOD_PORTAL_STRING_REGEX = Regex("^(?:[a-z]+:/+)?portal::(?:\\[([^\\]]*)\\])?\\s*(.*)$", RegexOption.IGNORE_CASE)
+private val VOD_HEX_SUBDOMAIN_REGEX = Regex("^https?://([0-9a-f]{8,20})\\.([a-z0-9.-]+\\.[a-z]{2,})(?:/.*)?$", RegexOption.IGNORE_CASE)
+
+private fun normalizeVodPortalParams(rawUrl: String, rawKey: String): Pair<String, String> {
+    var u = rawUrl.replace("\\/", "/").trim()
+    var k = rawKey.replace("\\/", "/").trim()
+    val mUrl = VOD_PORTAL_STRING_REGEX.find(u)
+    if (mUrl != null) {
+        val bracket = mUrl.groupValues.getOrNull(1).orEmpty()
+        u = mUrl.groupValues.getOrNull(2).orEmpty().trim()
+        bracket.split(";").forEach { part ->
+            val p = part.trim()
+            if (p.startsWith("key:", ignoreCase = true)) {
+                val ek = p.substring(4).trim()
+                if (ek.isNotEmpty()) k = ek
+            }
+        }
+    } else {
+        val mKey = VOD_PORTAL_STRING_REGEX.find(k)
+        if (mKey != null) {
+            val bracket = mKey.groupValues.getOrNull(1).orEmpty()
+            val eu = mKey.groupValues.getOrNull(2).orEmpty().trim()
+            if (eu.isNotEmpty()) u = eu
+            bracket.split(";").forEach { part ->
+                val p = part.trim()
+                if (p.startsWith("key:", ignoreCase = true)) {
+                    val ek = p.substring(4).trim()
+                    if (ek.isNotEmpty()) k = ek
+                }
+            }
+        }
+    }
+    if (u.isNotEmpty()) {
+        while (u.matches(Regex("^[a-z]{3,7}:/+[a-z]{3,7}:/+.*", RegexOption.IGNORE_CASE))) {
+            u = u.replaceFirst(Regex("^[a-z]{3,7}:/+", RegexOption.IGNORE_CASE), "")
+        }
+        u = when {
+            u.matches(Regex("^h+t+p+s:/+.*", RegexOption.IGNORE_CASE)) ->
+                u.replaceFirst(Regex("^h+t+p+s:/+", RegexOption.IGNORE_CASE), "https://")
+            u.matches(Regex("^h+t+p+:/+.*", RegexOption.IGNORE_CASE)) ->
+                u.replaceFirst(Regex("^h+t+p+:/+", RegexOption.IGNORE_CASE), "http://")
+            !u.startsWith("http://", ignoreCase = true) && !u.startsWith("https://", ignoreCase = true) -> {
+                val trimmed = u.trimStart('/')
+                if (trimmed.contains("/api/v1", ignoreCase = true)) "http://$trimmed" else "https://$trimmed"
+            }
+            else -> u
+        }
+        val subMatch = VOD_HEX_SUBDOMAIN_REGEX.find(u)
+        if (subMatch != null && k.isEmpty()) {
+            val extractedKey = subMatch.groupValues.getOrNull(1).orEmpty().trim()
+            if (extractedKey.isNotEmpty()) k = extractedKey
+        }
+    }
+    return u to k
+}
 
 private suspend fun fetchVodCatalog(
     webConfigUrl: String,
@@ -1987,22 +2482,24 @@ private suspend fun fetchVodCatalog(
         add("http://10.0.2.2:8080")
     }.distinct()
 
+    val (cleanVodUrl, cleanVodKey) = normalizeVodPortalParams(vodUrl, vodKey)
+
     val payload = JSONObject().apply {
-        put("url", vodUrl.trim())
-        put("vodUrl", vodUrl.trim())
+        put("url", cleanVodUrl)
+        put("vodUrl", cleanVodUrl)
         put("login", vodLogin.trim())
         put("vodLogin", vodLogin.trim())
         put("password", vodPassword.trim())
         put("vodPassword", vodPassword.trim())
-        put("key", vodKey.trim())
-        put("vodKey", vodKey.trim())
+        put("key", cleanVodKey)
+        put("vodKey", cleanVodKey)
         put("category", category.trim().ifBlank { "all" })
         put("genre", genre.trim().ifBlank { "all" })
         put("year", year.trim().ifBlank { "all" })
         put("sort", sort.trim().ifBlank { "added" })
         put("search", search.trim())
         put("offset", offset.coerceAtLeast(0))
-    }.toString()
+    }.toString().replace("\\/", "/")
 
     var lastError: String? = null
     for (base in candidateBases) {
@@ -2044,7 +2541,12 @@ private suspend fun fetchVodCatalog(
     )
 }
 
-private suspend fun resolveVodStreamOnDemand(
+private data class VodStreamResolution(
+    val streamUrl: String = "",
+    val episodes: List<VodEpisodeItem> = emptyList(),
+)
+
+private suspend fun resolveVodStreamAndEpisodes(
     webConfigUrl: String,
     vodUrl: String,
     vodLogin: String,
@@ -2052,7 +2554,7 @@ private suspend fun resolveVodStreamOnDemand(
     vodKey: String,
     cmd: String,
     requestJson: String,
-): String = withContext(Dispatchers.IO) {
+): VodStreamResolution = withContext(Dispatchers.IO) {
     val rawBase = webConfigUrl.trim().ifBlank { Playlist.DEFAULT_WEB_CONFIG_URL }.trimEnd('/')
     val candidateBases = buildList {
         if (rawBase.startsWith("http://", ignoreCase = true)) {
@@ -2069,17 +2571,19 @@ private suspend fun resolveVodStreamOnDemand(
         add("http://10.0.2.2:8080")
     }.distinct()
 
+    val (cleanVodUrl, cleanVodKey) = normalizeVodPortalParams(vodUrl, vodKey)
+
     val payload = JSONObject().apply {
         put("action", "stream")
-        put("url", vodUrl.trim())
-        put("vodUrl", vodUrl.trim())
+        put("url", cleanVodUrl)
+        put("vodUrl", cleanVodUrl)
         put("login", vodLogin.trim())
         put("password", vodPassword.trim())
-        put("key", vodKey.trim())
-        put("vodKey", vodKey.trim())
+        put("key", cleanVodKey)
+        put("vodKey", cleanVodKey)
         put("cmd", cmd)
         put("requestJson", requestJson)
-    }.toString()
+    }.toString().replace("\\/", "/")
 
     for (base in candidateBases) {
         try {
@@ -2087,7 +2591,7 @@ private suspend fun resolveVodStreamOnDemand(
             val conn = (endpoint.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 8_000
-                readTimeout = 12_000
+                readTimeout = 14_000
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Accept", "application/json")
@@ -2104,13 +2608,38 @@ private suspend fun resolveVodStreamOnDemand(
             conn.disconnect()
             if (body.startsWith("{")) {
                 val obj = JSONObject(body)
-                val resolved = obj.optString("streamUrl").ifBlank { obj.optString("url") }.trim()
-                if (resolved.isNotEmpty()) return@withContext resolved
+                val resolvedUrl = obj.optString("streamUrl").ifBlank { obj.optString("url") }.trim()
+                val epsArr = obj.optJSONArray("episodes") ?: JSONArray()
+                val episodes = buildList {
+                    for (j in 0 until epsArr.length()) {
+                        val ep = epsArr.optJSONObject(j) ?: continue
+                        val epStreamUrl = ep.optString("streamUrl").trim()
+                        val epReq = ep.optString("requestJson").trim()
+                        if (epStreamUrl.isNotEmpty() || epReq.isNotEmpty()) {
+                            add(
+                                VodEpisodeItem(
+                                    id = ep.optString("id", "ep_${j + 1}"),
+                                    title = ep.optString("title", "Серия ${j + 1}"),
+                                    season = ep.optInt("season", 1),
+                                    episode = ep.optInt("episode", j + 1),
+                                    streamUrl = epStreamUrl,
+                                    requestJson = epReq,
+                                )
+                            )
+                        }
+                    }
+                }
+                if (resolvedUrl.isNotEmpty() || episodes.isNotEmpty()) {
+                    return@withContext VodStreamResolution(
+                        streamUrl = resolvedUrl.ifBlank { episodes.firstOrNull()?.streamUrl.orEmpty() },
+                        episodes = episodes,
+                    )
+                }
             }
         } catch (_: Exception) {
         }
     }
-    ""
+    VodStreamResolution()
 }
 
 private fun parseVodCatalogJson(rawJson: String): VodCatalogResponse {
