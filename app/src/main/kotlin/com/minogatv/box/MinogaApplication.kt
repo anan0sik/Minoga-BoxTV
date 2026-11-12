@@ -27,6 +27,7 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.minogatv.box.core.network.SmartDohDns
 import com.minogatv.box.core.network.di.BaseOkHttpClient
 import okhttp3.OkHttpClient
 
@@ -48,6 +49,7 @@ class MinogaApplication : Application(), Configuration.Provider, ImageLoaderFact
 
     override fun onCreate() {
         super.onCreate()
+        SmartDohDns.init(this)
         // Safeguard against random system/decoder exceptions crashing the process on TV boxes
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->

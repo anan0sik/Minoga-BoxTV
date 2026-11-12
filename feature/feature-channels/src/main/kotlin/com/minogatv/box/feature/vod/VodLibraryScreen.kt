@@ -1923,9 +1923,16 @@ private fun VodFullscreenPlayerOverlay(
     }
 
     val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            playWhenReady = true
-        }
+        val vodHttpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
+            com.minogatv.box.core.network.SmartDohDns.getStreamingOkHttpClient(context)
+        ).setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(vodHttpDataSourceFactory))
+            .build()
+            .apply {
+                playWhenReady = true
+            }
     }
 
     LaunchedEffect(streamUrl, item.id, episodeIdx) {

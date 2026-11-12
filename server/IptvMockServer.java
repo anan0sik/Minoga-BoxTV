@@ -11,6 +11,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URL;
@@ -135,6 +137,7 @@ public class IptvMockServer {
         server.createContext("/hub/icon/", new HubIconHandler());
         server.createContext("/hub", new MsxHubHandler());
         server.createContext("/api/tv/proxy", new TvStreamProxyHandler());
+        server.createContext("/api/tv/resolve", new TvStreamResolveHandler());
         server.createContext("/api/tv/vod", new TvVodApiHandler());
         server.createContext("/api/tv/epg/status", new TvEpgStatusHandler());
         server.createContext("/api/tv/epg/live", new TvEpgLiveHandler());
@@ -162,7 +165,7 @@ public class IptvMockServer {
         server.start();
 
         // Pre-warm default EPG dataset in background so it is immediately ready for Smart TV & Android clients
-        getOrStartEpgDataset("http://epg.one/epg2.xml.gz");
+        getOrStartEpgDataset(DEFAULT_EPG_URL);
 
         System.out.println("==================================================================");
         System.out.println("  Minoga TV Box - Web Pairing & IPTV Server STARTED!");
@@ -654,9 +657,9 @@ public class IptvMockServer {
             }
             String json = "{\n"
                     + "  \"name\": \"Minoga TV Box\",\n"
-                    + "  \"version\": \"1.1.8\",\n"
-                    + "  \"parameter\": \"content:https://minogatvbox.duckdns.org/msx/content.json?v=118\",\n"
-                    + "  \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=118\"\n"
+                    + "  \"version\": \"1.1.9\",\n"
+                    + "  \"parameter\": \"content:https://minogatvbox.duckdns.org/msx/content.json?v=121\",\n"
+                    + "  \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=121\"\n"
                     + "}\n";
             sendResponse(exchange, 200, "application/json; charset=utf-8", json);
         }
@@ -677,7 +680,7 @@ public class IptvMockServer {
             String json = "{\n"
                     + "  \"type\": \"pages\",\n"
                     + "  \"headline\": \"Minoga TV Box\",\n"
-                    + "  \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=118\",\n"
+                    + "  \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=121\",\n"
                     + "  \"template\": {\n"
                     + "    \"type\": \"separate\",\n"
                     + "    \"layout\": \"0,0,4,3\",\n"
@@ -690,7 +693,7 @@ public class IptvMockServer {
                     + "      \"titleFooter\": \"Полноценный веб-интерфейс для LG и Samsung TV\",\n"
                     + "      \"image\": \"https://minogatvbox.duckdns.org/download/icon.png\",\n"
                     + "      \"icon\": \"tv\",\n"
-                    + "      \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=118\"\n"
+                    + "      \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=121\"\n"
                     + "    },\n"
                     + "    {\n"
                     + "      \"title\": \"Привязка плейлиста по коду\",\n"
@@ -779,7 +782,7 @@ public class IptvMockServer {
                         + "      \"image\": \"https://minogatvbox.duckdns.org/download/icon.png\",\n"
                         + "      \"badge\": \"MINOGA TV\",\n"
                         + "      \"badgeColor\": \"msx-cyan\",\n"
-                        + "      \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=118\"\n"
+                        + "      \"action\": \"link:https://minogatvbox.duckdns.org/tv/?v=121\"\n"
                         + "    },\n"
                         + "    {\n"
                         + "      \"title\": \"OttPlayer\",\n"
@@ -875,6 +878,164 @@ public class IptvMockServer {
         }
     }
 
+    // ─── Lightweight Zero-Traffic DNS & Redirect Resolver (GET /api/tv/resolve?url=...) ───
+    // Unwraps 301/302 stream redirects on blocked IPTV portal domains into the final CDN edge
+    // host and resolves IPv4 addresses without ever reading or proxying video bytes through Server1.
+    private static final Map<String, CachedDnsRecord> SERVER_DNS_CACHE = new ConcurrentHashMap<>();
+    private static final long SERVER_DNS_TTL_MS = 20 * 60 * 1000L; // 20 minutes
+
+    static class CachedDnsRecord {
+        final String ip;
+        final long expiresAtMs;
+        CachedDnsRecord(String ip, long expiresAtMs) {
+            this.ip = ip;
+            this.expiresAtMs = expiresAtMs;
+        }
+    }
+
+    private static String resolveHostIpv4Cached(String host) {
+        if (host == null || host.isEmpty()) return "";
+        String cleanHost = host.trim().toLowerCase(Locale.ROOT);
+        if (cleanHost.matches("^\\d{1,3}(\\.\\d{1,3}){3}$")) {
+            return cleanHost;
+        }
+        long now = System.currentTimeMillis();
+        CachedDnsRecord cached = SERVER_DNS_CACHE.get(cleanHost);
+        if (cached != null && cached.expiresAtMs > now) {
+            return cached.ip;
+        }
+        try {
+            InetAddress[] addrs = InetAddress.getAllByName(cleanHost);
+            for (InetAddress addr : addrs) {
+                if (addr instanceof Inet4Address && !addr.isLoopbackAddress() && !addr.isAnyLocalAddress()) {
+                    String ip = addr.getHostAddress();
+                    if (ip != null && !ip.isEmpty()) {
+                        SERVER_DNS_CACHE.put(cleanHost, new CachedDnsRecord(ip, now + SERVER_DNS_TTL_MS));
+                        return ip;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return "";
+    }
+
+    private static String replaceUriHostWithIpIfHttp(URI uri, String ip) {
+        if (uri == null || ip == null || ip.isEmpty()) return uri != null ? uri.toString() : "";
+        try {
+            if (!"http".equalsIgnoreCase(uri.getScheme())) {
+                return uri.toString();
+            }
+            String host = uri.getHost();
+            if (host == null || host.isEmpty() || host.equals(ip)) {
+                return uri.toString();
+            }
+            URI rewritten = new URI(
+                    uri.getScheme(),
+                    uri.getUserInfo(),
+                    ip,
+                    uri.getPort(),
+                    uri.getPath(),
+                    uri.getQuery(),
+                    uri.getFragment()
+            );
+            return rewritten.toString();
+        } catch (Exception e) {
+            return uri.toString();
+        }
+    }
+
+    static class TvStreamResolveHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendCorsPreflight(exchange);
+                return;
+            }
+            String rawUrlParam = getQueryParam(exchange.getRequestURI(), "url");
+            String hostParam = getQueryParam(exchange.getRequestURI(), "host");
+
+            if (rawUrlParam.isEmpty() && !hostParam.isEmpty()) {
+                String cleanHost = URLDecoder.decode(hostParam, StandardCharsets.UTF_8).trim();
+                if (TvStreamProxyHandler.isBlockedHost(cleanHost)) {
+                    sendResponse(exchange, 403, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"Forbidden host\"}");
+                    return;
+                }
+                String ip = resolveHostIpv4Cached(cleanHost);
+                String json = "{\"ok\":" + (!ip.isEmpty())
+                        + ",\"host\":\"" + escapeJson(cleanHost) + "\""
+                        + ",\"ip\":\"" + escapeJson(ip) + "\"}";
+                sendResponse(exchange, 200, "application/json; charset=utf-8", json);
+                return;
+            }
+
+            if (rawUrlParam.isEmpty()) {
+                sendResponse(exchange, 400, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"Missing url parameter\"}");
+                return;
+            }
+
+            String targetUrl = URLDecoder.decode(rawUrlParam, StandardCharsets.UTF_8).trim();
+            if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
+                sendResponse(exchange, 400, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"Only http/https URLs allowed\"}");
+                return;
+            }
+
+            HttpURLConnection conn = null;
+            try {
+                URI currentUri = URI.create(targetUrl);
+                if (TvStreamProxyHandler.isBlockedHost(currentUri.getHost())) {
+                    sendResponse(exchange, 403, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"Forbidden target host\"}");
+                    return;
+                }
+
+                // Follow up to 5 HTTP 301/302/303/307/308 redirects without reading any body bytes
+                for (int hop = 0; hop < 5; hop++) {
+                    URL urlObj = currentUri.toURL();
+                    conn = (HttpURLConnection) urlObj.openConnection();
+                    conn.setInstanceFollowRedirects(false);
+                    conn.setConnectTimeout(6000);
+                    conn.setReadTimeout(6000);
+                    conn.setRequestMethod("GET");
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (SmartTV; Linux; Tizen 6.0) MinogaTVBox/1.1.7");
+                    conn.setRequestProperty("Accept", "*/*");
+
+                    int status = conn.getResponseCode();
+                    String loc = conn.getHeaderField("Location");
+                    conn.disconnect();
+                    conn = null;
+
+                    if ((status == 301 || status == 302 || status == 303 || status == 307 || status == 308)
+                            && loc != null && !loc.isEmpty()) {
+                        currentUri = currentUri.resolve(loc.trim());
+                        if (TvStreamProxyHandler.isBlockedHost(currentUri.getHost())) {
+                            sendResponse(exchange, 403, "application/json; charset=utf-8", "{\"ok\":false,\"error\":\"Forbidden redirect host\"}");
+                            return;
+                        }
+                        continue;
+                    }
+                    break;
+                }
+
+                String finalUrl = currentUri.toString();
+                String finalHost = currentUri.getHost() != null ? currentUri.getHost() : "";
+                String ip = resolveHostIpv4Cached(finalHost);
+                String ipUrl = replaceUriHostWithIpIfHttp(currentUri, ip);
+
+                String json = "{\"ok\":true"
+                        + ",\"originalUrl\":\"" + escapeJson(targetUrl) + "\""
+                        + ",\"resolvedUrl\":\"" + escapeJson(finalUrl) + "\""
+                        + ",\"host\":\"" + escapeJson(finalHost) + "\""
+                        + ",\"ip\":\"" + escapeJson(ip) + "\""
+                        + ",\"ipUrl\":\"" + escapeJson(ipUrl) + "\"}";
+                sendResponse(exchange, 200, "application/json; charset=utf-8", json);
+            } catch (Exception e) {
+                sendResponse(exchange, 200, "application/json; charset=utf-8",
+                        "{\"ok\":false,\"originalUrl\":\"" + escapeJson(targetUrl) + "\",\"resolvedUrl\":\"" + escapeJson(targetUrl) + "\",\"error\":\"" + escapeJson(String.valueOf(e.getMessage())) + "\"}");
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+        }
+    }
+
     // ─── CORS & HTTP-to-HTTPS Stream / M3U Proxy (GET /api/tv/proxy?url=...) ────
 
     static class TvStreamProxyHandler implements HttpHandler {
@@ -926,7 +1087,7 @@ public class IptvMockServer {
                     conn.setConnectTimeout(10000);
                     conn.setReadTimeout(20000);
                     conn.setRequestMethod("GET");
-                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (SmartTV; Linux; Tizen 6.0) MinogaTVBox/1.1.2");
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (SmartTV; Linux; Tizen 6.0) MinogaTVBox/1.1.7");
                     conn.setRequestProperty("Accept", "*/*");
                     if (clientRange != null && !clientRange.isEmpty()) {
                         conn.setRequestProperty("Range", clientRange);
@@ -953,8 +1114,8 @@ public class IptvMockServer {
                     contentType = "application/octet-stream";
                 }
 
-                String pathLower = currentUri.getPath() != null ? currentUri.getPath().toLowerCase() : "";
-                boolean looksLikeM3u = contentType.toLowerCase().contains("mpegurl")
+                String pathLower = currentUri.getPath() != null ? currentUri.getPath().toLowerCase(Locale.ROOT) : "";
+                boolean looksLikeM3u = contentType.toLowerCase(Locale.ROOT).contains("mpegurl")
                         || pathLower.endsWith(".m3u8")
                         || pathLower.endsWith(".m3u");
 
@@ -970,7 +1131,7 @@ public class IptvMockServer {
                         int n = is.read(peek);
                         is.reset();
                         if (n >= 7) {
-                            String head = new String(peek, 0, n, StandardCharsets.UTF_8).trim().toUpperCase();
+                            String head = new String(peek, 0, n, StandardCharsets.UTF_8).trim().toUpperCase(Locale.ROOT);
                             if (head.startsWith("#EXTM3U")) {
                                 looksLikeM3u = true;
                             }
@@ -1020,9 +1181,9 @@ public class IptvMockServer {
             }
         }
 
-        private static boolean isBlockedHost(String host) {
+        static boolean isBlockedHost(String host) {
             if (host == null || host.isEmpty()) return true;
-            String h = host.toLowerCase();
+            String h = host.toLowerCase(Locale.ROOT);
             return h.equals("localhost")
                     || h.equals("127.0.0.1")
                     || h.equals("0.0.0.0")
@@ -1068,7 +1229,7 @@ public class IptvMockServer {
                 String trimmed = ref.trim();
                 URI resolved = baseUri.resolve(trimmed);
                 String baseQuery = baseUri.getRawQuery();
-                String pathLower = resolved.getPath() != null ? resolved.getPath().toLowerCase() : "";
+                String pathLower = resolved.getPath() != null ? resolved.getPath().toLowerCase(Locale.ROOT) : "";
                 if (baseQuery != null && !baseQuery.isEmpty() && !trimmed.contains("?")) {
                     if (pathLower.endsWith(".m3u8") || pathLower.endsWith(".m3u")) {
                         resolved = URI.create(resolved.toString() + "?" + baseQuery);
@@ -2393,13 +2554,23 @@ public class IptvMockServer {
         volatile long loadedAtMs = 0L;
         volatile int channelsCount = 0;
         volatile int programsCount = 0;
+        /** Last time any client requested this dataset (used for idle eviction). */
+        volatile long lastAccessMs = System.currentTimeMillis();
+        /** True while an indexing job for this dataset is queued or running. */
+        volatile boolean indexing = false;
+        /** True once at least one indexing pass succeeded (data can be served while re-indexing). */
+        volatile boolean hasData = false;
+        /** Time of the last failed indexing attempt (retry back-off). */
+        volatile long lastErrorMs = 0L;
 
+        // Maps are rebuilt into temporary instances and then swapped atomically (volatile
+        // reference), so old data keeps being served while a refresh is in progress.
         // xmltv channel id (lowercased) -> sorted list of programmes
-        final Map<String, List<EpgProgramItem>> programsByChannelId = new ConcurrentHashMap<>();
+        volatile Map<String, List<EpgProgramItem>> programsByChannelId = new ConcurrentHashMap<>();
         // normalized channel name / display-name -> xmltv channel id (lowercased)
-        final Map<String, String> nameToChannelId = new ConcurrentHashMap<>();
+        volatile Map<String, String> nameToChannelId = new ConcurrentHashMap<>();
         // xmltv channel id (lowercased) -> channel icon url from <icon src="..."/>
-        final Map<String, String> iconByChannelId = new ConcurrentHashMap<>();
+        volatile Map<String, String> iconByChannelId = new ConcurrentHashMap<>();
 
         EpgDataset(String epgUrl) {
             this.epgUrl = epgUrl;
@@ -2408,6 +2579,133 @@ public class IptvMockServer {
 
     private static final long EPG_CACHE_TTL_MS = 3 * 3600 * 1000L; // 3 hours
     private static final Map<String, EpgDataset> EPG_DATASETS = new ConcurrentHashMap<>();
+    private static final Object EPG_DATASETS_LOCK = new Object();
+    private static final String DEFAULT_EPG_URL = "http://epg.one/epg2.xml.gz";
+    /** Max number of EPG datasets kept in memory (the default epg.one dataset is pinned and counts too). */
+    private static final int EPG_MAX_DATASETS = 3;
+    /** Non-pinned datasets not requested for this long are evicted. */
+    private static final long EPG_IDLE_EVICT_MS = 6 * 3600 * 1000L;
+    /** Back-off before retrying a failed indexing attempt. */
+    private static final long EPG_ERROR_RETRY_MS = 60_000L;
+    /** Back-off before retrying a failed refresh of a dataset that still has (old) data. */
+    private static final long EPG_REFRESH_RETRY_MS = 15 * 60_000L;
+    private static final long EPG_INDEX_PAST_MS = 7L * 24 * 3600_000L;   // keep 7 days of archive
+    private static final long EPG_INDEX_AHEAD_MS = 3L * 24 * 3600_000L;  // keep 3 days ahead
+    private static final long EPG_OLD_DESC_AGE_MS = 24L * 3600_000L;     // programmes ended >24h ago
+    private static final int EPG_OLD_DESC_MAX = 150;                     // ...get descriptions cut to ~150 chars
+
+    /** Only one EPG indexing job runs at a time (the server has a single CPU core). */
+    private static final java.util.concurrent.ExecutorService EPG_INDEX_EXECUTOR =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "epg-indexer");
+                t.setDaemon(true);
+                return t;
+            });
+
+    private static final java.util.concurrent.ScheduledExecutorService EPG_EVICTOR =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "epg-evictor");
+                t.setDaemon(true);
+                return t;
+            });
+
+    static {
+        EPG_EVICTOR.scheduleAtFixedRate(() -> {
+            try {
+                synchronized (EPG_DATASETS_LOCK) {
+                    evictIdleEpgDatasets(System.currentTimeMillis());
+                }
+            } catch (Throwable t) {
+                System.out.println("[EPG] eviction error: " + t);
+            }
+        }, 10, 10, java.util.concurrent.TimeUnit.MINUTES);
+    }
+
+    /**
+     * Normalizes an EPG URL used as the dataset key: trims it and lowercases only the scheme and
+     * host (path, query and user-info are kept as is, tokens are never stripped).
+     */
+    private static String normalizeEpgUrl(String rawUrl) {
+        if (rawUrl == null) return DEFAULT_EPG_URL;
+        String u = rawUrl.trim();
+        int commaIdx = u.indexOf(',');
+        if (commaIdx > 0) {
+            u = u.substring(0, commaIdx).trim();
+        }
+        if (u.isEmpty()) return DEFAULT_EPG_URL;
+        int schemeEnd = u.indexOf("://");
+        if (schemeEnd <= 0) return u;
+        int authStart = schemeEnd + 3;
+        int authEnd = u.length();
+        for (char c : new char[]{'/', '?', '#'}) {
+            int idx = u.indexOf(c, authStart);
+            if (idx >= 0 && idx < authEnd) authEnd = idx;
+        }
+        String scheme = u.substring(0, schemeEnd).toLowerCase(Locale.ROOT);
+        String authority = u.substring(authStart, authEnd);
+        int at = authority.lastIndexOf('@');
+        String userInfo = at >= 0 ? authority.substring(0, at + 1) : "";
+        String host = (at >= 0 ? authority.substring(at + 1) : authority).toLowerCase(Locale.ROOT);
+        String tail = u.substring(authEnd);
+        if (("epg.one".equals(host) || "www.epg.one".equals(host))
+                && ("/epg2.xml".equalsIgnoreCase(tail) || "/epg.xml".equalsIgnoreCase(tail) || "/epg2.xml.gz".equalsIgnoreCase(tail))) {
+            return DEFAULT_EPG_URL;
+        }
+        return scheme + "://" + userInfo + host + tail;
+    }
+
+    /** Hides query strings / user-info (may contain personal tokens) when logging URLs. */
+    private static String maskEpgUrlForLog(String url) {
+        if (url == null) return "";
+        String u = url;
+        int q = u.indexOf('?');
+        if (q >= 0) u = u.substring(0, q) + "?…";
+        int schemeEnd = u.indexOf("://");
+        int at = u.indexOf('@');
+        int slash = schemeEnd >= 0 ? u.indexOf('/', schemeEnd + 3) : -1;
+        if (schemeEnd >= 0 && at > schemeEnd && (slash < 0 || at < slash)) {
+            u = u.substring(0, schemeEnd + 3) + "***@" + u.substring(at + 1);
+        }
+        return u;
+    }
+
+    /** Must be called while holding EPG_DATASETS_LOCK. */
+    private static void evictIdleEpgDatasets(long now) {
+        List<String> evicted = new ArrayList<>();
+        for (Map.Entry<String, EpgDataset> e : EPG_DATASETS.entrySet()) {
+            if (DEFAULT_EPG_URL.equals(e.getKey())) continue; // pinned
+            EpgDataset d = e.getValue();
+            if (d.indexing) continue;
+            if (now - d.lastAccessMs > EPG_IDLE_EVICT_MS) {
+                evicted.add(e.getKey());
+            }
+        }
+        for (String key : evicted) {
+            EPG_DATASETS.remove(key);
+            System.out.println("[EPG] evicted idle dataset " + maskEpgUrlForLog(key));
+        }
+        if (!evicted.isEmpty()) {
+            logEpgMemorySummary("after eviction");
+        }
+    }
+
+    private static void logEpgMemorySummary(String reason) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[EPG] ").append(reason).append(": datasets in memory=").append(EPG_DATASETS.size());
+        long total = 0;
+        for (EpgDataset d : EPG_DATASETS.values()) {
+            sb.append(" | ").append(maskEpgUrlForLog(d.epgUrl))
+                    .append(" status=").append(d.status)
+                    .append(" programmes=").append(d.programsCount);
+            total += d.programsCount;
+        }
+        Runtime rt = Runtime.getRuntime();
+        long usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024);
+        long maxMb = rt.maxMemory() / (1024 * 1024);
+        sb.append(" | total programmes=").append(total)
+                .append(" | heap used=").append(usedMb).append("MB/max ").append(maxMb).append("MB");
+        System.out.println(sb);
+    }
 
     static class CountingInputStream extends FilterInputStream {
         volatile long bytesRead = 0L;
@@ -2432,23 +2730,69 @@ public class IptvMockServer {
     }
 
     private static EpgDataset getOrStartEpgDataset(String rawUrl) {
-        String epgUrl = (rawUrl == null || rawUrl.trim().isEmpty())
-                ? "http://epg.one/epg2.xml.gz"
-                : rawUrl.trim();
-
-        EpgDataset ds = EPG_DATASETS.computeIfAbsent(epgUrl, EpgDataset::new);
+        String epgUrl = normalizeEpgUrl(rawUrl);
         long now = System.currentTimeMillis();
 
+        EpgDataset ds = EPG_DATASETS.get(epgUrl);
+        if (ds == null) {
+            synchronized (EPG_DATASETS_LOCK) {
+                ds = EPG_DATASETS.get(epgUrl);
+                if (ds == null) {
+                    boolean pinned = DEFAULT_EPG_URL.equals(epgUrl);
+                    if (!pinned && EPG_DATASETS.size() >= EPG_MAX_DATASETS) {
+                        evictIdleEpgDatasets(now);
+                    }
+                    if (!pinned && EPG_DATASETS.size() >= EPG_MAX_DATASETS) {
+                        // Limit reached: serve the shared (pinned) epg.one dataset instead of
+                        // creating another full in-memory copy. Channels are matched by name.
+                        ds = EPG_DATASETS.get(DEFAULT_EPG_URL);
+                        if (ds == null) {
+                            ds = new EpgDataset(DEFAULT_EPG_URL);
+                            EPG_DATASETS.put(DEFAULT_EPG_URL, ds);
+                        }
+                        System.out.println("[EPG] dataset limit (" + EPG_MAX_DATASETS + ") reached, serving "
+                                + DEFAULT_EPG_URL + " for " + maskEpgUrlForLog(epgUrl));
+                    } else {
+                        ds = new EpgDataset(epgUrl);
+                        EPG_DATASETS.put(epgUrl, ds);
+                    }
+                }
+            }
+        }
+        ds.lastAccessMs = now;
+
         synchronized (ds) {
-            boolean expired = "READY".equals(ds.status) && (now - ds.loadedAtMs > EPG_CACHE_TTL_MS);
-            if ("IDLE".equals(ds.status) || "ERROR".equals(ds.status) || expired) {
-                ds.status = "LOADING";
-                ds.progress = 2;
-                ds.stage = "Подключение к серверу EPG…";
-                ds.error = "";
-                Thread worker = new Thread(() -> downloadAndIndexEpg(ds), "epg-indexer");
-                worker.setDaemon(true);
-                worker.start();
+            if (!ds.indexing) {
+                boolean expired = "READY".equals(ds.status) && (now - ds.loadedAtMs > EPG_CACHE_TTL_MS);
+                boolean retryError = "ERROR".equals(ds.status) && (now - ds.lastErrorMs > EPG_ERROR_RETRY_MS);
+                if ("IDLE".equals(ds.status) || retryError || expired) {
+                    ds.indexing = true;
+                    ds.error = "";
+                    if (!ds.hasData) {
+                        // No data yet: report LOADING. With existing data the dataset stays READY
+                        // and keeps serving the old programme while the refresh is queued/running.
+                        ds.status = "LOADING";
+                        ds.progress = 1;
+                        ds.stage = "В очереди на обработку…";
+                    }
+                    final EpgDataset job = ds;
+                    try {
+                        EPG_INDEX_EXECUTOR.submit(() -> {
+                            try {
+                                downloadAndIndexEpg(job);
+                            } finally {
+                                job.indexing = false;
+                            }
+                        });
+                    } catch (RuntimeException rex) {
+                        ds.indexing = false;
+                        if (!ds.hasData) {
+                            ds.status = "ERROR";
+                            ds.lastErrorMs = now;
+                        }
+                        ds.error = String.valueOf(rex.getMessage());
+                    }
+                }
             }
         }
         return ds;
@@ -2456,6 +2800,13 @@ public class IptvMockServer {
 
     private static void downloadAndIndexEpg(EpgDataset ds) {
         HttpURLConnection conn = null;
+        // When refreshing a dataset that already has data, keep status/progress untouched so
+        // clients keep getting the old programme (status READY) until the swap below.
+        final boolean refresh = ds.hasData;
+        if (!refresh) {
+            ds.progress = 2;
+            ds.stage = "Подключение к серверу EPG…";
+        }
         try {
             URI currentUri = URI.create(ds.epgUrl);
             for (int hop = 0; hop < 5; hop++) {
@@ -2477,12 +2828,17 @@ public class IptvMockServer {
             }
 
             long contentLength = conn.getContentLengthLong();
-            ds.progress = 5;
-            ds.stage = "Загрузка и распаковка XMLTV…";
+            if (!refresh) {
+                ds.progress = 5;
+                ds.stage = "Загрузка и распаковка XMLTV…";
+            }
 
             long nowMs = System.currentTimeMillis();
-            long windowStartMs = nowMs - 48L * 3600_000L; // 48 hours archive
-            long windowEndMs = nowMs + 36L * 3600_000L;   // 36 hours ahead (full day + next day)
+            long windowStartMs = nowMs - EPG_INDEX_PAST_MS;  // 7 days archive
+            long windowEndMs = nowMs + EPG_INDEX_AHEAD_MS;   // 3 days ahead
+            long oldDescBeforeMs = nowMs - EPG_OLD_DESC_AGE_MS;
+            // Per-indexing intern pool: identical titles/descriptions share one String instance.
+            Map<String, String> internPool = new java.util.HashMap<>(65536);
 
             Map<String, List<EpgProgramItem>> tempPrograms = new ConcurrentHashMap<>();
             Map<String, String> tempNames = new ConcurrentHashMap<>();
@@ -2574,20 +2930,27 @@ public class IptvMockServer {
                         } else if ("channel".equalsIgnoreCase(localName)) {
                             currentChannelId = null;
                         } else if ("title".equalsIgnoreCase(localName) && progChannelId != null) {
-                            progTitle = textBuf.toString().trim();
+                            String t = textBuf.toString().trim();
+                            String pooled = internPool.putIfAbsent(t, t);
+                            progTitle = pooled != null ? pooled : t;
                             activeTag = null;
                         } else if ("desc".equalsIgnoreCase(localName) && progChannelId != null) {
                             String d = textBuf.toString().trim();
-                            progDesc = d.length() > 180 ? d.substring(0, 180) + "…" : d;
+                            int maxLen = progEndMs < oldDescBeforeMs ? EPG_OLD_DESC_MAX : 180;
+                            progDesc = d.length() > maxLen ? d.substring(0, maxLen) + "…" : d;
+                            if (!progDesc.isEmpty()) {
+                                String pooled = internPool.putIfAbsent(progDesc, progDesc);
+                                if (pooled != null) progDesc = pooled;
+                            }
                             activeTag = null;
                         } else if ("programme".equalsIgnoreCase(localName)) {
                             if (progChannelId != null && progTitle != null && !progTitle.isEmpty()) {
                                 List<EpgProgramItem> list = tempPrograms.computeIfAbsent(progChannelId, k -> new ArrayList<>(64));
-                                if (list.size() < 500) {
+                                if (list.size() < 1500) {
                                     list.add(new EpgProgramItem(progStartMs, progEndMs, progTitle, progDesc != null ? progDesc : ""));
                                     progCount++;
                                 }
-                                if ((progCount & 511) == 0) {
+                                if ((progCount & 511) == 0 && !refresh) {
                                     ds.channelsCount = chCount;
                                     ds.programsCount = progCount;
                                     if (contentLength > 0) {
@@ -2605,29 +2968,44 @@ public class IptvMockServer {
                 }
             }
 
-            ds.stage = "Сортировка расписания каналов…";
-            ds.progress = 97;
+            internPool = null; // release the pool before sorting/swapping
+            if (!refresh) {
+                ds.stage = "Сортировка расписания каналов…";
+                ds.progress = 97;
+            }
             Comparator<EpgProgramItem> cmp = Comparator.comparingLong(a -> a.startMs);
-            for (List<EpgProgramItem> list : tempPrograms.values()) {
+            for (Map.Entry<String, List<EpgProgramItem>> en : tempPrograms.entrySet()) {
+                List<EpgProgramItem> list = en.getValue();
                 list.sort(cmp);
+                if (list instanceof ArrayList) ((ArrayList<EpgProgramItem>) list).trimToSize();
             }
 
-            ds.programsByChannelId.clear();
-            ds.programsByChannelId.putAll(tempPrograms);
-            ds.nameToChannelId.clear();
-            ds.nameToChannelId.putAll(tempNames);
-            ds.iconByChannelId.clear();
-            ds.iconByChannelId.putAll(tempIcons);
+            // Atomic swap: readers see either the complete old maps or the complete new maps.
+            ds.programsByChannelId = tempPrograms;
+            ds.nameToChannelId = tempNames;
+            ds.iconByChannelId = tempIcons;
             ds.channelsCount = chCount;
             ds.programsCount = progCount;
             ds.loadedAtMs = System.currentTimeMillis();
+            ds.hasData = true;
+            ds.error = "";
             ds.progress = 100;
             ds.stage = "Телепрограмма загружена (" + chCount + " кан.)";
             ds.status = "READY";
-        } catch (Exception e) {
+            logEpgMemorySummary("indexed " + maskEpgUrlForLog(ds.epgUrl) + " (" + chCount + " ch, " + progCount + " programmes)");
+        } catch (Throwable e) {
             ds.error = String.valueOf(e.getMessage());
-            ds.stage = "Ошибка загрузки EPG: " + ds.error;
-            ds.status = "ERROR";
+            if (ds.hasData) {
+                // Keep serving the old data; retry the refresh a bit later.
+                ds.loadedAtMs = System.currentTimeMillis() - EPG_CACHE_TTL_MS + EPG_REFRESH_RETRY_MS;
+                ds.status = "READY";
+                System.out.println("[EPG] refresh failed for " + maskEpgUrlForLog(ds.epgUrl) + ": " + ds.error + " (old data kept)");
+            } else {
+                ds.stage = "Ошибка загрузки EPG: " + ds.error;
+                ds.lastErrorMs = System.currentTimeMillis();
+                ds.status = "ERROR";
+                System.out.println("[EPG] indexing failed for " + maskEpgUrlForLog(ds.epgUrl) + ": " + ds.error);
+            }
         } finally {
             if (conn != null) conn.disconnect();
         }
@@ -2827,8 +3205,8 @@ public class IptvMockServer {
                         if (hasField) out.append(',');
                         out.append("\"p\":[");
                         boolean firstProg = true;
-                        long minMs = nowMs - 24 * 3600_000L;
-                        long maxMs = nowMs + 36 * 3600_000L;
+                        long minMs = nowMs - 24 * 3600_000L; // 1 day back
+                        long maxMs = nowMs + 48 * 3600_000L; // 2 days ahead
                         for (int i = 0; i < list.size(); i++) {
                             EpgProgramItem item = list.get(i);
                             if (item.endMs <= minMs || item.startMs >= maxMs) continue;
@@ -2870,13 +3248,24 @@ public class IptvMockServer {
 
             StringBuilder out = new StringBuilder(4096);
             out.append("{\"status\":\"").append(escapeJson(ds.status)).append("\",\"programs\":[");
+            long nowMs = System.currentTimeMillis();
+            long minMs = nowMs - EPG_INDEX_PAST_MS;      // 7 days back
+            long maxMs = nowMs + EPG_INDEX_AHEAD_MS;     // 3 days ahead
+            long oldDescBeforeMs = nowMs - EPG_OLD_DESC_AGE_MS;
+            boolean firstProg = true;
             for (int i = 0; i < list.size(); i++) {
                 EpgProgramItem p = list.get(i);
-                if (i > 0) out.append(',');
+                if (p.endMs <= minMs || p.startMs >= maxMs) continue;
+                String d = p.desc != null ? p.desc : "";
+                if (p.endMs < oldDescBeforeMs && d.length() > EPG_OLD_DESC_MAX) {
+                    d = d.substring(0, EPG_OLD_DESC_MAX) + "…";
+                }
+                if (!firstProg) out.append(',');
+                firstProg = false;
                 out.append("{\"s\":").append(p.startMs)
                         .append(",\"e\":").append(p.endMs)
                         .append(",\"t\":\"").append(escapeJson(p.title)).append("\"")
-                        .append(",\"d\":\"").append(escapeJson(p.desc)).append("\"}");
+                        .append(",\"d\":\"").append(escapeJson(d)).append("\"}");
             }
             out.append("]}");
             sendResponse(exchange, 200, "application/json; charset=utf-8", out.toString());

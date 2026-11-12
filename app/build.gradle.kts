@@ -14,8 +14,8 @@ android {
         applicationId = "com.minogatv.box"
         minSdk = 24
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.1.6"
+        versionCode = 21
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

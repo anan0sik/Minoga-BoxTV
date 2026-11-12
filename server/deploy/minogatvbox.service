@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/minogatvbox
-ExecStart=/usr/bin/java -cp /opt/minogatvbox server.IptvMockServer 8091
+ExecStart=/usr/bin/java -Xmx2g -cp /opt/minogatvbox server.IptvMockServer 8091
 Restart=always
 RestartSec=3
 User=www-data

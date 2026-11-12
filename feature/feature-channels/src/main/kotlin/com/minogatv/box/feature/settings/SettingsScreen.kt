@@ -28,7 +28,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -280,6 +283,199 @@ private fun FocusableIconButton(
     }
 }
 
+// ─── Settings sections (Obsidian glass group panels) ─────────────────────────
+
+private val SectionPanelA     = Color(0xFF0D111A)
+private val SectionPanelB     = Color(0xFF101626)
+private val SectionBorder     = Color(0xFF00E5FF).copy(alpha = 0.15f)
+private val AccentCyan        = Color(0xFF00E5FF)
+private val AccentBlueEpg     = Color(0xFF3B82F6)
+private val AccentGold        = Color(0xFFFBBF24)
+private val AccentPurple      = Color(0xFFA855F7)
+private val AccentGreen       = Color(0xFF10B981)
+private val AccentOrange      = Color(0xFFF97316)
+private val AccentTeal        = Color(0xFF2DD4BF)
+
+private enum class GroupEdge { TOP, MIDDLE, BOTTOM }
+
+/**
+ * Draws one horizontal slice of a section's group panel: the fill plus the 1dp border,
+ * with rounded 16dp corners only on the top (first) / bottom (last) slice. Each LazyColumn
+ * item paints its own slice, so focus / scrolling behaviour of the items stays unchanged.
+ */
+private fun Modifier.sectionGroupSlice(edge: GroupEdge, fill: Color): Modifier = this.drawBehind {
+    val r = 16.dp.toPx()
+    val sw = 1.dp.toPx()
+    val w = size.width
+    val h = size.height
+    val topR = if (edge == GroupEdge.TOP) r else 0f
+    val botR = if (edge == GroupEdge.BOTTOM) r else 0f
+    val fillPath = androidx.compose.ui.graphics.Path().apply {
+        addRoundRect(
+            androidx.compose.ui.geometry.RoundRect(
+                left = 0f, top = 0f, right = w, bottom = h,
+                topLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(topR),
+                topRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(topR),
+                bottomRightCornerRadius = androidx.compose.ui.geometry.CornerRadius(botR),
+                bottomLeftCornerRadius = androidx.compose.ui.geometry.CornerRadius(botR),
+            ),
+        )
+    }
+    drawPath(fillPath, fill)
+    // Border: stroke an extended rounded rect and clip to this slice, so the middle slices only
+    // show the side lines and the caps show the rounded top / bottom edge.
+    val ext = r + sw * 2
+    val strokeTop = if (edge == GroupEdge.TOP) sw / 2 else -ext
+    val strokeBottom = if (edge == GroupEdge.BOTTOM) h - sw / 2 else h + ext
+    val strokePath = androidx.compose.ui.graphics.Path().apply {
+        addRoundRect(
+            androidx.compose.ui.geometry.RoundRect(
+                left = sw / 2, top = strokeTop, right = w - sw / 2, bottom = strokeBottom,
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(r),
+            ),
+        )
+    }
+    clipRect(0f, 0f, w, h) {
+        drawPath(strokePath, SectionBorder, style = androidx.compose.ui.graphics.drawscope.Stroke(width = sw))
+    }
+}
+
+/** Header strip of a settings section: 4dp accent bar, icon, caps title, thin cyan line. */
+@Composable
+private fun SettingsSection(
+    title: String,
+    icon: String,
+    accent: Color,
+    isFirst: Boolean = false,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = if (isFirst) 12.dp else 22.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(22.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(accent),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(text = icon, fontSize = 16.sp)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = title.uppercase(),
+                color = TextPrim,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (actionLabel != null && onAction != null) {
+                FocusableSettingButton(
+                    text = actionLabel,
+                    isSelected = false,
+                    onClick = onAction,
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(
+                        listOf(accent.copy(alpha = 0.7f), AccentCyan.copy(alpha = 0.35f), Color.Transparent),
+                    ),
+                ),
+        )
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
+/** Builder scope: every `item {}` / `items()` inside a section is drawn on the shared group panel. */
+private class SettingsSectionScope(private val lazy: LazyListScope, private val panel: Color) {
+    fun item(
+        key: Any? = null,
+        content: @Composable androidx.compose.foundation.lazy.LazyItemScope.() -> Unit,
+    ) {
+        lazy.item(key = key) {
+            val itemScope = this
+            SectionBodySlice(panel) { itemScope.content() }
+        }
+    }
+
+    fun <T> items(
+        items: List<T>,
+        key: ((T) -> Any)? = null,
+        itemContent: @Composable androidx.compose.foundation.lazy.LazyItemScope.(T) -> Unit,
+    ) {
+        lazy.items(items = items, key = key) { value ->
+            val itemScope = this
+            SectionBodySlice(panel) { itemScope.itemContent(value) }
+        }
+    }
+}
+
+@Composable
+private fun SectionBodySlice(panel: Color, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .sectionGroupSlice(GroupEdge.MIDDLE, panel)
+            .padding(horizontal = 12.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) { content() }
+    }
+}
+
+/**
+ * Adds a settings section to the LazyColumn: header + rounded top cap, the section's items on a
+ * shared panel (alternating background by [index]), and a rounded bottom cap.
+ */
+private fun LazyListScope.settingsSection(
+    index: Int,
+    title: String,
+    icon: String,
+    accent: Color,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+    content: SettingsSectionScope.() -> Unit,
+) {
+    val panel = if (index % 2 == 0) SectionPanelA else SectionPanelB
+    item(key = "section_header_$index") {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            SettingsSection(
+                title = title,
+                icon = icon,
+                accent = accent,
+                isFirst = index == 0,
+                actionLabel = actionLabel,
+                onAction = onAction,
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(12.dp)
+                    .sectionGroupSlice(GroupEdge.TOP, panel),
+            )
+        }
+    }
+    SettingsSectionScope(this, panel).content()
+    item(key = "section_footer_$index") {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(14.dp)
+                .sectionGroupSlice(GroupEdge.BOTTOM, panel),
+        )
+    }
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 /**
@@ -445,18 +641,8 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Section header: Внешний вид и размер шрифта ───────────────
-            item {
-                Text(
-                    text = "ВНЕШНИЙ ВИД И РАЗМЕР ШРИФТА",
-                    color = Accent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
-                )
-            }
-
+            // ── Section: Внешний вид и размер шрифта ──────────────────────
+            settingsSection(index = 0, title = "Внешний вид и размер шрифта", icon = "🖥", accent = AccentPurple) {
             item {
                 var showScaleDropdown by remember { mutableStateOf(false) }
                 val scaleOptions = listOf(
@@ -563,14 +749,17 @@ fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
             }
 
-            // ── Section header: Плейлисты ──────────────────────────────────
-            item {
-                SectionHeader(
-                    title = "Плейлисты",
-                    actionLabel = "+ Добавить",
-                    onAction = { showAddDialog = true },
-                )
             }
+
+            // ── Section: Плейлисты ─────────────────────────────────────────
+            settingsSection(
+                index = 1,
+                title = "Плейлисты",
+                icon = "📋",
+                accent = AccentCyan,
+                actionLabel = "+ Добавить",
+                onAction = { showAddDialog = true },
+            ) {
 
             // ── Remote Web Page Loader Card (minogatvbox.duckdns.org) ──────
             item {
@@ -680,17 +869,10 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Section header: Медиатека (Портал фильмов и сериалов) ─────
-            item {
-                Text(
-                    text = "🎬 МЕДИАТЕКА (ПОРТАЛ ФИЛЬМОВ И СЕРИАЛОВ)",
-                    color = Color(0xFF00E5FF),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
             }
+
+            // ── Section: Медиатека (Портал фильмов и сериалов) ─────────────
+            settingsSection(index = 2, title = "Медиатека (фильмы и сериалы)", icon = "🎬", accent = AccentGold) {
 
             item {
                 val hasVodPortal = vodPortalUrl.isNotBlank() || vodPortalKey.isNotBlank()
@@ -813,17 +995,10 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Section header: Воспроизведение ───────────────────────────
-            item {
-                Text(
-                    text = "ВОСПРОИЗВЕДЕНИЕ И АВТОЗАПУСК",
-                    color = Accent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
             }
+
+            // ── Section: Воспроизведение и автозапуск ──────────────────────
+            settingsSection(index = 3, title = "Воспроизведение и автозапуск", icon = "▶", accent = AccentGreen) {
 
             item {
                 val toggleBootAutoStart: (Boolean) -> Unit = { checked ->
@@ -1116,20 +1291,101 @@ fun SettingsScreen(
                     }
                 }
             }
-
-
-
-            // ── Section header: Источник телепрограммы (EPG) ─────────────
-            item {
-                Text(
-                    text = "ИСТОЧНИК ТЕЛЕПРОГРАММЫ (EPG)",
-                    color = Accent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
             }
+
+            // ── Section: Сеть (Smart DoH) ──────────────────────────────────
+            settingsSection(index = 4, title = "Сеть (Smart DoH)", icon = "🛡", accent = AccentCyan) {
+            // DNS-over-HTTPS (DoH) bypass for ISP DNS spoofing / blocking
+            item {
+                var dohMode by remember {
+                    mutableStateOf(
+                        com.minogatv.box.core.network.SmartDohDns.getCurrentMode(context)
+                    )
+                }
+                val dohOptions = listOf(
+                    com.minogatv.box.core.network.SmartDohDns.MODE_AUTO to "⚡ Авто (Умный DoH)",
+                    com.minogatv.box.core.network.SmartDohDns.MODE_ALWAYS to "🔒 Всегда DoH (1.1.1.1 / 8.8.8.8)",
+                    com.minogatv.box.core.network.SmartDohDns.MODE_OFF to "Системный DNS",
+                )
+                Spacer(Modifier.height(8.dp))
+                SettingCardContainer { isFocused ->
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "🛡️ Защищённый DNS и стабильность сети (Smart DoH)",
+                                color = if (isFocused) Color.White else TextPrim,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isFocused) Color(0xFF234273) else Surface2)
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                            ) {
+                                Text(
+                                    text = dohMode,
+                                    color = if (isFocused) Color.White else Accent,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                        val dohDesc = when (dohMode) {
+                            com.minogatv.box.core.network.SmartDohDns.MODE_ALWAYS ->
+                                "Прямое разрешение всех адресов по стандарту RFC 8484 через Cloudflare (1.1.1.1) и Google Public DNS (8.8.8.8) для максимальной стабильности соединения"
+                            com.minogatv.box.core.network.SmartDohDns.MODE_OFF ->
+                                "Стандартный системный DNS роутера / оператора связи (без резервирования DoH)"
+                            else ->
+                                "Прямое разрешение адресов через зашифрованный DNS-over-HTTPS (Cloudflare 1.1.1.1 / Google 8.8.8.8). Помогает, если плейлист или каналы не открываются из-за сбоев или некорректных ответов DNS провайдера."
+                        }
+                        Text(
+                            text = dohDesc,
+                            color = if (dohMode != com.minogatv.box.core.network.SmartDohDns.MODE_OFF) Color(0xFF00E5FF) else TextSec,
+                            fontSize = 12.sp,
+                        )
+                    }
+
+                    if (isPortrait) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            dohOptions.forEach { (mode, label) ->
+                                val isSelected = dohMode == mode
+                                FocusableSettingButton(
+                                    text = if (isSelected) "✓ $label" else label,
+                                    isSelected = isSelected,
+                                    onClick = {
+                                        dohMode = mode
+                                        com.minogatv.box.core.network.SmartDohDns.setCurrentMode(context, mode)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            dohOptions.forEach { (mode, label) ->
+                                val isSelected = dohMode == mode
+                                FocusableSettingButton(
+                                    text = if (isSelected) "✓ $label" else label,
+                                    isSelected = isSelected,
+                                    onClick = {
+                                        dohMode = mode
+                                        com.minogatv.box.core.network.SmartDohDns.setCurrentMode(context, mode)
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            }
+
+            // ── Section: Телепрограмма (EPG) ───────────────────────────────
+            settingsSection(index = 5, title = "Телепрограмма (EPG)", icon = "📅", accent = AccentBlueEpg) {
 
             item {
                 val isLiveServerEpg = customEpgUrl.isBlank() || customEpgUrl.equals(Playlist.LIVE_SERVER_EPG, ignoreCase = true)
@@ -1298,17 +1554,10 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Section header: Родительский контроль ─────────────────────
-            item {
-                Text(
-                    text = "РОДИТЕЛЬСКИЙ КОНТРОЛЬ",
-                    color = Accent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
             }
+
+            // ── Section: Родительский контроль ─────────────────────────────
+            settingsSection(index = 6, title = "Родительский контроль", icon = "🔒", accent = AccentOrange) {
 
             item {
                 SettingRowContainer(modifier = Modifier.clickable { showPinChangeDialog = true }) { isFocused ->
@@ -1325,17 +1574,10 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Section header: Резервное копирование ──────────────────────
-            item {
-                Text(
-                    text = "РЕЗЕРВНОЕ КОПИРОВАНИЕ (BACKUP & RESTORE)",
-                    color = Accent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
             }
+
+            // ── Section: Резервное копирование ─────────────────────────────
+            settingsSection(index = 7, title = "Резервное копирование", icon = "💾", accent = AccentTeal) {
 
             item {
                 SettingCardContainer { isFocused ->
@@ -1361,17 +1603,10 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Section header: Оценка программы и отзывы ─────────────────
-            item {
-                Text(
-                    text = "⭐ ОЦЕНКА ПРОГРАММЫ, ОТЗЫВЫ И ВОПРОСЫ РАЗРАБОТЧИКУ",
-                    color = Color(0xFFFBBF24),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
             }
+
+            // ── Section: Отзывы и вопросы ──────────────────────────────────
+            settingsSection(index = 8, title = "Отзывы и вопросы разработчику", icon = "⭐", accent = AccentGold) {
 
             item {
                 AppFeedbackSettingsCard(
@@ -1380,17 +1615,10 @@ fun SettingsScreen(
                 )
             }
 
-            // ── Section header: Обновление программы ──────────────────────
-            item {
-                Text(
-                    text = "ОБНОВЛЕНИЕ ПРОГРАММЫ",
-                    color = Accent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
-                )
             }
+
+            // ── Section: Обновление программы ──────────────────────────────
+            settingsSection(index = 9, title = "Обновление программы", icon = "🔄", accent = AccentGreen) {
 
             item {
                 AppUpdateSettingsCard(
@@ -1409,6 +1637,8 @@ fun SettingsScreen(
                         AppUpdateManager.downloadAndInstall(context)
                     },
                 )
+            }
+
             }
 
             item { Spacer(Modifier.height(24.dp)) }

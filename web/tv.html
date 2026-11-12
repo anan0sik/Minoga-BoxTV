@@ -773,6 +773,243 @@
       flex: 1;
     }
 
+    /* EPG: day-relative date label, day dividers, archive / past highlighting */
+    .epg-date {
+      color: var(--text-muted);
+      font-size: 0.74rem;
+      font-weight: 600;
+      margin-right: 0.32rem;
+    }
+
+    .epg-item.past-epg .epg-time,
+    .epg-item.past-epg .epg-title {
+      color: var(--text-muted);
+    }
+
+    .epg-item.arch-epg {
+      background: rgba(245, 158, 11, 0.08);
+      border-left: 3px solid #F59E0B;
+    }
+
+    .epg-item.arch-epg .epg-time {
+      color: #FBBF24;
+    }
+
+    .epg-item.arch-epg.focused, .epg-item.arch-epg:hover {
+      background: var(--bg-focused);
+      border-color: var(--neon-cyan);
+      border-left-color: #F59E0B;
+    }
+
+    .badge-arch-amber {
+      background: rgba(245, 158, 11, 0.16);
+      border: 1px solid rgba(245, 158, 11, 0.6);
+      color: #FBBF24;
+      font-size: 0.66rem;
+      font-weight: 800;
+      padding: 0.08rem 0.35rem;
+      border-radius: 0.25rem;
+      margin-right: 0.45rem;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    .epg-day-divider {
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      padding: 0.4rem 0 0.32rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .epg-more-row {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.74rem;
+      padding: 0.25rem 0;
+    }
+
+    .epg-end-note {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.76rem;
+      font-style: italic;
+      padding: 0.55rem 0.4rem 0.4rem;
+    }
+
+    /* ─── Fullscreen Zap Panel (channel list over video) ─── */
+    .player-zap-panel {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 30%;
+      min-width: 19rem;
+      z-index: 6;
+      display: flex;
+      flex-direction: column;
+      background: rgba(7, 9, 14, 0.75);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+      border-right: 1px solid rgba(0, 229, 255, 0.28);
+      box-shadow: 8px 0 28px rgba(0, 0, 0, 0.55);
+    }
+
+    .zap-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.45rem;
+      padding: 0.65rem 0.7rem 0.5rem;
+      border-bottom: 1px solid rgba(0, 229, 255, 0.22);
+      flex-shrink: 0;
+    }
+
+    .zap-header-center {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+    }
+
+    .zap-nav-arrow {
+      background: rgba(0, 229, 255, 0.12);
+      border: 1px solid rgba(0, 229, 255, 0.35);
+      color: var(--neon-cyan);
+      border-radius: 0.4rem;
+      padding: 0.2rem 0.48rem;
+      font-size: 0.78rem;
+      font-weight: 800;
+      cursor: pointer;
+      flex-shrink: 0;
+      line-height: 1.1;
+    }
+
+    .zap-nav-arrow:hover {
+      background: rgba(0, 229, 255, 0.28);
+      border-color: var(--neon-cyan);
+    }
+
+    .zap-header-title {
+      font-size: 0.92rem;
+      font-weight: 800;
+      color: #fff;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .zap-count {
+      font-size: 0.76rem;
+      font-weight: 800;
+      color: var(--neon-cyan);
+      flex-shrink: 0;
+    }
+
+    .zap-list {
+      position: relative;
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.4rem 0.45rem;
+    }
+
+    .zap-row {
+      display: flex;
+      align-items: center;
+      padding: 0.38rem 0.5rem;
+      margin-bottom: 0.22rem;
+      border-radius: 0.5rem;
+      border: 1.5px solid transparent;
+      cursor: pointer;
+    }
+
+    .zap-row.playing {
+      background: rgba(0, 229, 255, 0.08);
+    }
+
+    .zap-row.focused, .zap-row:hover {
+      background: rgba(0, 229, 255, 0.18);
+      border-color: var(--neon-cyan);
+      box-shadow: 0 0 12px rgba(0, 229, 255, 0.3);
+    }
+
+    .zap-num {
+      width: 2.3rem;
+      font-size: 0.8rem;
+      font-weight: 800;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+
+    .zap-logo {
+      width: 2.4rem;
+      height: 1.6rem;
+      margin-right: 0.55rem;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--neon-cyan);
+    }
+
+    .zap-logo img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .zap-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .zap-name {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #fff;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .zap-onair {
+      color: var(--neon-cyan);
+      font-size: 0.68rem;
+      font-weight: 800;
+      margin-left: 0.35rem;
+    }
+
+    .zap-prog {
+      font-size: 0.76rem;
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-top: 0.08rem;
+    }
+
+    .zap-more {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.74rem;
+      padding: 0.3rem 0;
+      cursor: pointer;
+    }
+
+    .zap-hint {
+      flex-shrink: 0;
+      padding: 0.45rem 0.8rem 0.7rem;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      border-top: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
     /* ─── Fullscreen Video Player ─── */
     .player-screen {
       position: fixed;
@@ -858,14 +1095,62 @@
       margin: 0 auto;
     }
 
+    /* Settings: each section is a visually separated group (alternating panels + accent header strip) */
+    .settings-group {
+      background: #0D111A;
+      border: 1px solid rgba(0, 229, 255, 0.15);
+      border-radius: 1rem;
+      padding: 0.15rem 1rem 0.5rem;
+      margin: 0 0 1.2rem;
+    }
+
+    .settings-group:nth-of-type(even) {
+      background: #101626;
+    }
+
+    .settings-group .settings-card {
+      background: rgba(7, 9, 14, 0.6);
+    }
+
+    .settings-group .settings-card:hover {
+      background: var(--bg-focused);
+    }
+
     .settings-sec-title {
-      color: var(--electric-blue);
-      font-size: 0.82rem;
+      position: relative;
+      display: flex;
+      align-items: center;
+      color: #fff;
+      font-size: 0.92rem;
       font-weight: 800;
       letter-spacing: 1.2px;
       text-transform: uppercase;
-      margin: 1rem 0 0.45rem;
+      margin: 0 0 0.7rem;
+      padding: 0.75rem 0 0.55rem 0.9rem;
+      border-bottom: 1px solid rgba(0, 229, 255, 0.35);
     }
+
+    .settings-sec-title::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.65rem;
+      bottom: 0.5rem;
+      width: 4px;
+      border-radius: 2px;
+      background: var(--neon-cyan);
+    }
+
+    .settings-sec-title .sec-ico {
+      margin-right: 0.55rem;
+      font-size: 1.05rem;
+    }
+
+    .settings-group.acc-cyan .settings-sec-title::before { background: #00E5FF; }
+    .settings-group.acc-gold .settings-sec-title::before { background: #F5A623; }
+    .settings-group.acc-purple .settings-sec-title::before { background: #A78BFA; }
+    .settings-group.acc-green .settings-sec-title::before { background: #10B981; }
+    .settings-group.acc-blue .settings-sec-title::before { background: #4F8EF7; }
 
     .settings-card {
       background: var(--bg-surface1);
@@ -1679,6 +1964,12 @@
         <button id="btn-search" class="top-btn" onclick="openSearchModal()">
           <span><svg class="svg-ico" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></span><span>Поиск</span>
         </button>
+        <div id="btn-sort-wrap" class="hidden" style="position: relative; display: inline-block;">
+          <button id="btn-sort" class="top-btn" onclick="toggleChannelSortDropdown(event)">
+            <span>⇅</span><span id="btn-sort-label">Как в плейлисте</span>
+          </button>
+          <div id="sort-dropdown-menu" class="vod-dropdown-menu hidden" style="right: 0; left: auto; min-width: 16rem; z-index: 300;"></div>
+        </div>
         <button id="btn-settings" class="top-btn" onclick="switchScreen('SETTINGS')">
           <span><svg class="svg-ico" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></span><span>Настройки</span>
         </button>
@@ -1748,7 +2039,8 @@
           <span style="font-size: 1.15rem; font-weight: 800;">Настройки Minoga TV (Smart TV / MSX)</span>
         </div>
 
-        <div class="settings-sec-title">ПЛЕЙЛИСТЫ И СОПРЯЖЕНИЕ ПО 4-ЗНАЧНОМУ КОДУ</div>
+        <section class="settings-group acc-cyan">
+        <div class="settings-sec-title"><span class="sec-ico">📋</span><span>ПЛЕЙЛИСТЫ И СОПРЯЖЕНИЕ ПО 4-ЗНАЧНОМУ КОДУ</span></div>
         <div class="settings-card" style="border-color: rgba(0, 229, 255, 0.45);">
           <div class="settings-row">
             <div>
@@ -1782,7 +2074,10 @@
           <div id="settings-playlists-list"></div>
         </div>
 
-        <div class="settings-sec-title">МЕДИАТЕКА (ПОРТАЛ ФИЛЬМОВ И СЕРИАЛОВ)</div>
+        </section>
+
+        <section class="settings-group acc-gold">
+        <div class="settings-sec-title"><span class="sec-ico">🎬</span><span>МЕДИАТЕКА (ПОРТАЛ ФИЛЬМОВ И СЕРИАЛОВ)</span></div>
         <div class="settings-card" style="border-color: rgba(0, 229, 255, 0.35);">
           <div class="settings-row" style="margin-bottom: 0.45rem;">
             <div>
@@ -1800,7 +2095,10 @@
           </div>
         </div>
 
-        <div class="settings-sec-title">ВНЕШНИЙ ВИД И РАЗМЕР ШРИФТА НА ТЕЛЕВИЗОРЕ (АДАПТАЦИЯ 4K / FULLHD)</div>
+        </section>
+
+        <section class="settings-group acc-purple">
+        <div class="settings-sec-title"><span class="sec-ico">🖥</span><span>ВНЕШНИЙ ВИД И РАЗМЕР ШРИФТА НА ТЕЛЕВИЗОРЕ (АДАПТАЦИЯ 4K / FULLHD)</span></div>
         <div class="settings-card" style="position: relative; z-index: 40;">
           <div class="settings-row">
             <div>
@@ -1817,7 +2115,10 @@
           </div>
         </div>
 
-        <div class="settings-sec-title">ВЫБОР ВИДЕОПЛЕЕРА И ВОСПРОИЗВЕДЕНИЕ</div>
+        </section>
+
+        <section class="settings-group acc-green">
+        <div class="settings-sec-title"><span class="sec-ico">▶</span><span>ВЫБОР ВИДЕОПЛЕЕРА И ВОСПРОИЗВЕДЕНИЕ</span></div>
         <div class="settings-card">
           <div style="font-weight: 700; font-size: 0.98rem; margin-bottom: 0.25rem;">Движок видеоплеера (по умолчанию: Нативный ТВ)</div>
           <div id="player-engine-desc" style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 0.6rem;">
@@ -1851,7 +2152,26 @@
           </div>
         </div>
 
-        <div class="settings-sec-title">⭐ ОЦЕНКА ПРОГРАММЫ, ОТЗЫВЫ И ВОПРОСЫ РАЗРАБОТЧИКУ</div>
+        </section>
+
+        <section class="settings-group acc-cyan">
+        <div class="settings-sec-title"><span class="sec-ico">🛡</span><span>СЕТЬ (SMART DoH)</span></div>
+        <div class="settings-card" style="border-color: rgba(0, 229, 255, 0.35);">
+          <div style="font-weight: 700; font-size: 0.98rem; margin-bottom: 0.25rem;">🛡️ Защищённый DNS и стабильность сети (Smart DoH: Cloudflare 1.1.1.1 / Google 8.8.8.8)</div>
+          <div id="doh-mode-desc" style="color: var(--text-secondary); font-size: 0.8rem; margin-bottom: 0.6rem;">
+            Прямое разрешение адресов по стандарту RFC 8484 для безошибочного подключения к серверам плейлистов и видеопотоков при сбоях DNS роутера или оператора
+          </div>
+          <div style="display: flex; flex-wrap: wrap;">
+            <button id="doh-AUTO" class="btn-dark active" data-settings-nav="1" style="flex:1; margin: 0.15rem;" onclick="setDohMode('AUTO')">⚡ Авто (Умный DoH)</button>
+            <button id="doh-ALWAYS" class="btn-dark" data-settings-nav="1" style="flex:1; margin: 0.15rem;" onclick="setDohMode('ALWAYS')">🔒 Всегда DoH (1.1.1.1 / 8.8.8.8)</button>
+            <button id="doh-OFF" class="btn-dark" data-settings-nav="1" style="flex:1; margin: 0.15rem;" onclick="setDohMode('OFF')">Выкл (Системный DNS)</button>
+          </div>
+        </div>
+
+        </section>
+
+        <section class="settings-group acc-gold">
+        <div class="settings-sec-title"><span class="sec-ico">⭐</span><span>ОЦЕНКА ПРОГРАММЫ, ОТЗЫВЫ И ВОПРОСЫ РАЗРАБОТЧИКУ</span></div>
         <div class="settings-card">
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
             <div>
@@ -1886,7 +2206,10 @@
           </div>
         </div>
 
-        <div class="settings-sec-title">ПРАВОВАЯ ИНФОРМАЦИЯ И ОТКАЗ ОТ ОТВЕТСТВЕННОСТИ</div>
+        </section>
+
+        <section class="settings-group acc-blue">
+        <div class="settings-sec-title"><span class="sec-ico">⚖️</span><span>ПРАВОВАЯ ИНФОРМАЦИЯ И ОТКАЗ ОТ ОТВЕТСТВЕННОСТИ</span></div>
         <div class="settings-card">
           <div class="settings-row">
             <div>
@@ -1896,6 +2219,7 @@
             <button id="open-disclaimer-btn" class="btn-dark" data-settings-nav="1" onclick="openDisclaimerModal()">⚖️ Прочитать соглашение</button>
           </div>
         </div>
+        </section>
       </div>
     </main>
 
@@ -1973,13 +2297,27 @@
           </button>
         </div>
         <div class="hint-bar" style="background: transparent; border-top: none; padding-top: 0.15rem;">
-          <div class="hint-item" onclick="stepPlayerChannel(-1)"><span class="hint-key">▲▼</span><span>Канал / Панель</span></div>
+          <div class="hint-item" onclick="event.stopPropagation(); if (!openZapPanel()) stepPlayerVodOrChannel(-1);"><span class="hint-key">▲▼</span><span>Список каналов</span></div>
+          <div class="hint-item"><span class="hint-key">CH±</span><span>Канал</span></div>
           <div class="hint-item"><span class="hint-key">◄►</span><span>Кнопки / Перемотка</span></div>
           <div class="hint-item" onclick="togglePlayerPlayPause()"><span class="hint-key">OK</span><span>Пауза / Выбор</span></div>
           <div class="hint-item" onclick="togglePlayerCurrentFavorite()"><span class="hint-key" style="color:#FF5252;">🔴</span><span>Избранное</span></div>
           <div class="hint-item" onclick="closeFullscreenPlayer()"><span class="hint-key">Back</span><span>Назад</span></div>
         </div>
       </div>
+    </div>
+    <!-- Fullscreen Zap Panel: semi-transparent channel list over the playing video (▲▼ in live TV) -->
+    <div id="player-zap-panel" class="player-zap-panel hidden" onclick="event.stopPropagation(); resetZapPanelTimer();" onmousemove="event.stopPropagation(); resetZapPanelTimer();">
+      <div class="zap-header">
+        <button type="button" class="zap-nav-arrow" onclick="event.stopPropagation(); switchZapFolder(-1)" title="Предыдущая папка (◄)">◄</button>
+        <div class="zap-header-center">
+          <span id="zap-header-title" class="zap-header-title">Каналы</span>
+          <span id="zap-header-count" class="zap-count"></span>
+        </div>
+        <button type="button" class="zap-nav-arrow" onclick="event.stopPropagation(); switchZapFolder(1)" title="Следующая папка (►)">►</button>
+      </div>
+      <div id="zap-list" class="zap-list"></div>
+      <div class="zap-hint">▲▼ Канал • ◄► Папка • CH± по 10 • OK Смотреть • Back Закрыть</div>
     </div>
   </div>
 
@@ -2430,6 +2768,7 @@
       settingsScaleDropdownFocusIdx: 0,
       livePreviewEnabled: safeStorageGet('minoga_tv_preview', 'true') !== 'false',
       catchupMode: safeStorageGet('minoga_tv_catchup', 'AUTO') || 'AUTO',
+      dohMode: safeStorageGet('minoga_tv_doh_mode', 'AUTO') || 'AUTO', // 'AUTO' | 'ALWAYS' | 'OFF'
       playerEngine: safeStorageGet('minoga_tv_player_engine_v2', 'NATIVE') || 'NATIVE', // 'AUTO' | 'NATIVE' | 'DIRECT' | 'MSX'
       isLoadingPlaylists: false,
       allChannels: [],
@@ -2448,8 +2787,24 @@
       isFocusInSidePanel: false,
       focusedEpgIdx: 0,
       currentEpgItems: [],
+      currentEpgChannelId: null, // ch.id whose schedule is in currentEpgItems
+      currentEpgIsFallback: true, // true while placeholder hourly slots are displayed
+      epgWindowStart: -1, // virtualized EPG list: first rendered item index
+      epgWindowEnd: -1, // virtualized EPG list: last rendered item index (exclusive)
+      epgRenderedChannelId: null,
+      channelScheduleInflight: {}, // ch.id -> true while /api/tv/epg/channel request is running
+      channelSortMode: safeStorageGet('minoga_tv_sort_mode', 'NONE') || 'NONE', // 'NONE' | 'AZ' | 'ZA'
+      sortDropdownOpen: false,
+      sortDropdownFocusIdx: 0,
+      zapOpen: false, // fullscreen player channel list overlay
+      zapFolderTitle: 'Все каналы',
+      zapChannels: [],
+      zapFocusIdx: 0,
+      zapWindowStart: -1,
+      zapWindowEnd: -1,
+      zapHideTimer: null,
       liveEpgByChannelId: {}, // ch.id -> {t, s, e, nt, ns, ne, ic}
-      channelScheduleCache: {}, // ch.id -> [{s, e, t, d}]
+      channelScheduleCache: {}, // ch.id -> {ts, programs: [{s, e, t, d}]} (30-min TTL)
       activeEpgUrl: 'http://epg.one/epg2.xml.gz',
       epgPollTimer: null,
       lastLiveEpgSyncMs: 0,
@@ -2704,6 +3059,7 @@
       applyUiScale(state.uiScale);
       updatePreviewToggleUi();
       setCatchupMode(state.catchupMode);
+      setDohMode(state.dohMode);
       setPlayerEngine(state.playerEngine);
       initOnScreenKeyboard();
       renderSettingsVodStatus();
@@ -2820,6 +3176,13 @@
     }
 
     // ─── M3U Parser, Folder Builder & EPG Sync ─────────────────────────────────
+    function cleanEpgUrl(rawUrl) {
+      if (!rawUrl) return '';
+      const first = String(rawUrl).split(',')[0].trim();
+      if (!first) return '';
+      return first.replace(/^(https?:\/\/(?:www\.)?epg\.one\/epg2?\.xml)$/i, '$1.gz');
+    }
+
     function reloadAllPlaylists() {
       renderSettingsPlaylists();
       if (state.playlists.length === 0) {
@@ -2854,7 +3217,7 @@
               saveChannelsCache(state.allChannels);
             }
           }
-          state.activeEpgUrl = detectedEpgUrl || 'http://epg.one/epg2.xml.gz';
+          state.activeEpgUrl = cleanEpgUrl(detectedEpgUrl) || 'http://epg.one/epg2.xml.gz';
           state.channelScheduleCache = {};
 
           setSyncProgress(true, 'Загружено каналов: ' + state.allChannels.length + '. Запуск синхронизации EPG…', 32);
@@ -2984,7 +3347,7 @@
         if (!live || !live.e) continue;
         if (now >= live.e) {
           // Roll over to next program if available in live entry or schedule cache
-          const sched = state.channelScheduleCache[chId];
+          const sched = getCachedChannelSchedule(chId, true);
           let rolled = false;
           if (Array.isArray(sched) && sched.length > 0) {
             const curSlotIdx = sched.findIndex(p => now >= p.s && now < p.e);
@@ -3038,8 +3401,13 @@
           if (barEl && epgInfo.pct > 0) barEl.style.width = epgInfo.pct + '%';
         }
         const focusedCh = state.filteredChannels[state.focusedChannelIdx];
-        if (focusedCh && state.channelScheduleCache[focusedCh.id]) {
-          applyChannelScheduleToSidePanel(focusedCh, state.channelScheduleCache[focusedCh.id], true);
+        const focusedSched = focusedCh ? getCachedChannelSchedule(focusedCh.id, true) : null;
+        if (focusedSched) {
+          applyChannelScheduleToSidePanel(focusedCh, focusedSched, true);
+          if (!getCachedChannelSchedule(focusedCh.id, false)) {
+            // Cached schedule is older than 30 min: refresh it silently in the background
+            fetchChannelScheduleFromServer(focusedCh);
+          }
         }
       }
 
@@ -3049,35 +3417,70 @@
       }
     }
 
+    const CHANNEL_SCHEDULE_TTL_MS = 30 * 60 * 1000;
+
+    // Returns cached programs array for a channel or null. allowStale=false enforces the 30-min TTL.
+    function getCachedChannelSchedule(chId, allowStale) {
+      const entry = state.channelScheduleCache[chId];
+      if (!entry || !Array.isArray(entry.programs) || entry.programs.length === 0) return null;
+      if (!allowStale && (Date.now() - (entry.ts || 0)) > CHANNEL_SCHEDULE_TTL_MS) return null;
+      return entry.programs;
+    }
+
+    function fetchChannelScheduleFromServer(ch) {
+      if (!ch || state.channelScheduleInflight[ch.id]) return;
+      state.channelScheduleInflight[ch.id] = true;
+      const q = '/api/tv/epg/channel?url=' + encodeURIComponent(state.activeEpgUrl)
+        + '&tvgId=' + encodeURIComponent(ch.tvgId || '')
+        + '&name=' + encodeURIComponent(ch.name);
+      xhrRequestJson('GET', q, null, function(err, data) {
+        state.channelScheduleInflight[ch.id] = false;
+        if (err || !data) return;
+        if (data.status === 'LOADING' && (!Array.isArray(data.programs) || data.programs.length === 0)) {
+          setTimeout(function() {
+            const cur = state.filteredChannels[state.focusedChannelIdx];
+            if (cur && cur.id === ch.id && state.screen === 'CHANNELS') {
+              fetchChannelScheduleFromServer(ch);
+            }
+          }, 1500);
+          return;
+        }
+        if (!Array.isArray(data.programs) || data.programs.length === 0) return;
+        state.channelScheduleCache[ch.id] = { ts: Date.now(), programs: data.programs };
+        const currentCh = state.filteredChannels[state.focusedChannelIdx];
+        if (currentCh && currentCh.id === ch.id) {
+          // Keep the cursor on the same programme if the real schedule of this channel was already shown
+          const preserve = state.currentEpgChannelId === ch.id && !state.currentEpgIsFallback;
+          applyChannelScheduleToSidePanel(ch, data.programs, preserve);
+        }
+      });
+    }
+
     function loadChannelEpgSchedule(ch) {
       if (!ch) return;
-      if (state.channelScheduleCache[ch.id]) {
-        applyChannelScheduleToSidePanel(ch, state.channelScheduleCache[ch.id]);
+      const staleOrFresh = getCachedChannelSchedule(ch.id, true);
+      if (staleOrFresh) {
+        applyChannelScheduleToSidePanel(ch, staleOrFresh);
+        if (getCachedChannelSchedule(ch.id, false)) return;
+        // Expired (older than 30 min): show cached data instantly, refresh in background
+        fetchChannelScheduleFromServer(ch);
         return;
       }
       // Show fallback immediately while loading
       buildFallbackScheduleSlots(ch);
       renderEpgPanel();
-
-      const q = '/api/tv/epg/channel?url=' + encodeURIComponent(state.activeEpgUrl)
-        + '&tvgId=' + encodeURIComponent(ch.tvgId || '')
-        + '&name=' + encodeURIComponent(ch.name);
-      xhrRequestJson('GET', q, null, function(err, data) {
-        if (err || !data || !Array.isArray(data.programs) || data.programs.length === 0) return;
-        state.channelScheduleCache[ch.id] = data.programs;
-        const currentCh = state.filteredChannels[state.focusedChannelIdx];
-        if (currentCh && currentCh.id === ch.id) {
-          applyChannelScheduleToSidePanel(ch, data.programs);
-        }
-      });
+      fetchChannelScheduleFromServer(ch);
     }
 
     function applyChannelScheduleToSidePanel(ch, rawPrograms, preserveFocusedSlot) {
       const now = Date.now();
+      let prevFocusedStartMs = null;
+      if (preserveFocusedSlot && state.isFocusInSidePanel && state.currentEpgChannelId === ch.id) {
+        const prevSlot = state.currentEpgItems[state.focusedEpgIdx];
+        if (prevSlot) prevFocusedStartMs = prevSlot.startMs;
+      }
       const slots = rawPrograms.map(p => {
-        const d1 = new Date(p.s);
-        const d2 = new Date(p.e);
-        const timeStr = `${String(d1.getHours()).padStart(2,'0')}:${String(d1.getMinutes()).padStart(2,'0')}–${String(d2.getHours()).padStart(2,'0')}:${String(d2.getMinutes()).padStart(2,'0')}`;
+        const timeStr = formatClockHm(p.s) + '–' + formatClockHm(p.e);
         const isLive = now >= p.s && now < p.e;
         const isPast = p.e <= now;
         const cleanTitle = cleanDisplayText(p.t) || p.t || 'Телепередача';
@@ -3092,10 +3495,16 @@
         };
       });
       state.currentEpgItems = slots;
+      state.currentEpgChannelId = ch.id;
+      state.currentEpgIsFallback = false;
       const liveIdx = slots.findIndex(s => s.isLive);
-      if (!preserveFocusedSlot || !state.isFocusInSidePanel) {
+      if (prevFocusedStartMs !== null) {
+        const keepIdx = slots.findIndex(s => s.startMs === prevFocusedStartMs);
+        state.focusedEpgIdx = keepIdx >= 0 ? keepIdx : (liveIdx >= 0 ? liveIdx : 0);
+      } else if (!preserveFocusedSlot || !state.isFocusInSidePanel) {
         state.focusedEpgIdx = liveIdx >= 0 ? liveIdx : Math.max(0, slots.length - 1);
       }
+      state.focusedEpgIdx = Math.max(0, Math.min(state.focusedEpgIdx, slots.length - 1));
       if (liveIdx >= 0) {
         const liveSlot = slots[liveIdx];
         const nextSlot = slots[liveIdx + 1] || null;
@@ -3145,7 +3554,7 @@
         if (!line) continue;
 
         if (line.toUpperCase().startsWith('#EXTM3U')) {
-          headerEpgUrl = extractAttr(line, 'url-tvg') || extractAttr(line, 'x-tvg-url') || extractAttr(line, 'tvg-url') || '';
+          headerEpgUrl = cleanEpgUrl(extractAttr(line, 'url-tvg') || extractAttr(line, 'x-tvg-url') || extractAttr(line, 'tvg-url') || '');
           defaultCatchupAttr = extractAttr(line, 'catchup') || extractAttr(line, 'catchup-type') || extractAttr(line, 'catchup_type') || '';
           const hDays = parseInt(
             extractAttr(line, 'catchup-days') || extractAttr(line, 'catchup_days') ||
@@ -3351,11 +3760,14 @@
     }
 
     // ─── TopBar Focus Helper (Избранное & История shown ONLY in VOD) ───────────
-    const TOPBAR_ALL_BUTTON_IDS = ['group-pill', 'btn-vod', 'btn-vod-fav', 'btn-vod-hist', 'btn-search', 'btn-settings'];
+    const TOPBAR_ALL_BUTTON_IDS = ['group-pill', 'btn-vod', 'btn-vod-fav', 'btn-vod-hist', 'btn-search', 'btn-sort', 'btn-settings'];
 
     function getActiveTopBarButtonIds() {
       if (state.screen === 'VOD') {
         return ['group-pill', 'btn-vod', 'btn-vod-fav', 'btn-vod-hist', 'btn-search', 'btn-settings'];
+      }
+      if (state.screen === 'CHANNELS') {
+        return ['group-pill', 'btn-vod', 'btn-search', 'btn-sort', 'btn-settings'];
       }
       return ['group-pill', 'btn-vod', 'btn-search', 'btn-settings'];
     }
@@ -3399,6 +3811,16 @@
       if (favBtn) favBtn.classList.toggle('hidden', !isVod);
       if (histBtn) histBtn.classList.toggle('hidden', !isVod);
 
+      const isChannels = state.screen === 'CHANNELS';
+      const sortWrap = document.getElementById('btn-sort-wrap');
+      if (sortWrap) sortWrap.classList.toggle('hidden', !isChannels);
+      if (!isChannels && state.sortDropdownOpen) {
+        state.sortDropdownOpen = false;
+        renderChannelSortDropdown();
+      }
+      const sortLbl = document.getElementById('btn-sort-label');
+      if (sortLbl) sortLbl.textContent = getChannelSortLabel(state.channelSortMode);
+
       const favLbl = document.getElementById('btn-vod-fav-label');
       if (favLbl) {
         const fc = state.vodFavorites ? state.vodFavorites.size : 0;
@@ -3429,6 +3851,147 @@
           }
         }
       });
+    }
+
+    // ─── Channel Sorting (А–Я / Я–А / как в плейлисте), one global mode ────────
+    const CHANNEL_SORT_OPTIONS = [
+      { mode: 'NONE', label: 'Без сортировки (как в плейлисте)' },
+      { mode: 'AZ', label: 'А → Я' },
+      { mode: 'ZA', label: 'Я → А' }
+    ];
+    let channelNameCollator = null;
+    let channelNameCollatorChecked = false;
+
+    function getChannelSortLabel(mode) {
+      if (mode === 'AZ') return 'А–Я';
+      if (mode === 'ZA') return 'Я–А';
+      return 'Как в плейлисте';
+    }
+
+    function normalizeChannelSortKey(name) {
+      return String(name || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
+    }
+
+    // Natural (numeric-aware) fallback compare for engines without Intl / localeCompare options
+    function naturalCompareSimple(a, b) {
+      const ra = a.match(/\d+|\D+/g) || [];
+      const rb = b.match(/\d+|\D+/g) || [];
+      const n = Math.min(ra.length, rb.length);
+      for (let i = 0; i < n; i++) {
+        const x = ra[i];
+        const y = rb[i];
+        if (x === y) continue;
+        const xd = /^\d/.test(x);
+        const yd = /^\d/.test(y);
+        if (xd && yd) {
+          const dx = parseInt(x, 10) - parseInt(y, 10);
+          if (dx !== 0) return dx;
+          continue;
+        }
+        return x < y ? -1 : 1;
+      }
+      return ra.length - rb.length;
+    }
+
+    function compareChannelSortKeys(a, b) {
+      if (!channelNameCollatorChecked) {
+        channelNameCollatorChecked = true;
+        try {
+          if (typeof Intl !== 'undefined' && Intl.Collator) {
+            channelNameCollator = new Intl.Collator('ru', { numeric: true, sensitivity: 'base' });
+          }
+        } catch (e) {
+          channelNameCollator = null;
+        }
+      }
+      if (channelNameCollator) {
+        try { return channelNameCollator.compare(a, b); } catch (e) {}
+      }
+      try {
+        return a.localeCompare(b, 'ru', { numeric: true, sensitivity: 'base' });
+      } catch (e2) {
+        return naturalCompareSimple(a, b);
+      }
+    }
+
+    // Returns a NEW sorted array (never mutates state.allChannels). NONE returns the list as-is.
+    function applyChannelSort(list) {
+      const mode = state.channelSortMode;
+      if (!Array.isArray(list) || list.length < 2 || (mode !== 'AZ' && mode !== 'ZA')) return list;
+      const dir = mode === 'ZA' ? -1 : 1;
+      const keyed = list.map((ch, i) => ({ ch: ch, k: normalizeChannelSortKey(ch.name), i: i }));
+      keyed.sort((x, y) => {
+        const c = compareChannelSortKeys(x.k, y.k);
+        if (c !== 0) return c * dir;
+        return x.i - y.i; // stable
+      });
+      return keyed.map(x => x.ch);
+    }
+
+    function buildChannelsForFolderTitle(title) {
+      const folderObj = state.folders.find(f => f.title === title) || null;
+      if (title === 'Все каналы') return state.allChannels;
+      if ((folderObj && folderObj.isFavFolder) || title === 'Избранные каналы' || title === 'Избранное') {
+        return state.allChannels.filter(c => state.favorites.has(c.streamUrl));
+      }
+      return state.allChannels.filter(c => c.group === title);
+    }
+
+    function toggleChannelSortDropdown(e) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      if (state.screen !== 'CHANNELS') return;
+      state.sortDropdownOpen = !state.sortDropdownOpen;
+      if (state.sortDropdownOpen) {
+        const idx = CHANNEL_SORT_OPTIONS.findIndex(o => o.mode === state.channelSortMode);
+        state.sortDropdownFocusIdx = idx >= 0 ? idx : 0;
+        state.isFocusInTopBar = true;
+        state.topBarIdx = Math.max(0, getActiveTopBarButtonIds().indexOf('btn-sort'));
+        renderTopBarFocus();
+      }
+      renderChannelSortDropdown();
+    }
+
+    function renderChannelSortDropdown() {
+      const menu = document.getElementById('sort-dropdown-menu');
+      if (!menu) return;
+      if (!state.sortDropdownOpen) {
+        menu.classList.add('hidden');
+        return;
+      }
+      menu.classList.remove('hidden');
+      menu.innerHTML = CHANNEL_SORT_OPTIONS.map((opt, idx) => {
+        const isSel = opt.mode === state.channelSortMode;
+        const isFoc = idx === state.sortDropdownFocusIdx;
+        return `<div id="sort-dd-opt-${idx}" class="vod-dropdown-item ${isSel ? 'selected' : ''} ${isFoc ? 'focused' : ''}" onclick="event.stopPropagation(); setChannelSortMode('${opt.mode}')">
+          <span>${opt.label}</span>
+          ${isSel ? '<span>✓</span>' : ''}
+        </div>`;
+      }).join('');
+    }
+
+    function setChannelSortMode(mode) {
+      if (mode !== 'AZ' && mode !== 'ZA') mode = 'NONE';
+      state.sortDropdownOpen = false;
+      renderChannelSortDropdown();
+      const changed = state.channelSortMode !== mode;
+      state.channelSortMode = mode;
+      safeStorageSet('minoga_tv_sort_mode', mode);
+      renderTopBarFocus();
+      if (!changed || state.screen !== 'CHANNELS') return;
+
+      // Re-sort the current folder and keep the cursor on the same channel
+      const focusedCh = state.filteredChannels[state.focusedChannelIdx];
+      state.filteredChannels = applyChannelSort(buildChannelsForFolderTitle(state.selectedFolderTitle));
+      let newIdx = focusedCh ? state.filteredChannels.findIndex(c => c.id === focusedCh.id) : 0;
+      if (newIdx < 0) newIdx = 0;
+      state.focusedChannelIdx = newIdx;
+      state.lastRenderedChannelIdx = newIdx;
+      state.renderedWindowStart = -1;
+      renderChannelsList(true);
+      const ch = state.filteredChannels[newIdx];
+      if (ch) {
+        document.getElementById('preview-ch-name').textContent = `${newIdx + 1}. ${ch.name}`;
+      }
     }
 
     // ─── Rendering: Folders (Strict 4-Column Full-Width Float Grid) ────────────
@@ -3554,6 +4117,7 @@
       } else {
         state.filteredChannels = state.allChannels.filter(c => c.group === folder.title);
       }
+      state.filteredChannels = applyChannelSort(state.filteredChannels);
 
       state.focusedChannelIdx = 0;
       state.lastRenderedChannelIdx = 0;
@@ -3780,37 +4344,190 @@
         });
       }
       state.currentEpgItems = slots;
+      state.currentEpgChannelId = ch.id;
+      state.currentEpgIsFallback = true;
       const liveIdx = slots.findIndex(s => s.isLive);
       state.focusedEpgIdx = liveIdx >= 0 ? liveIdx : 0;
     }
 
-    function renderEpgPanel() {
+    // ─── EPG date helpers (Сегодня → only time; Вчера / Завтра; "Пн 10.11") ────
+    const RU_WEEKDAYS_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+    const RU_WEEKDAYS_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
+    const RU_MONTHS_GENITIVE = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+
+    function getLocalDayKey(ms) {
+      const d = new Date(ms);
+      return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    }
+
+    function getDayOffsetFromToday(ms) {
+      const d = new Date(ms);
+      d.setHours(0, 0, 0, 0);
+      const t = new Date();
+      t.setHours(0, 0, 0, 0);
+      return Math.round((d.getTime() - t.getTime()) / 86400000);
+    }
+
+    // '' for today, 'Вчера' / 'Завтра', otherwise 'Пн 10.11' (by programme START)
+    function formatEpgDayPrefix(ms) {
+      const off = getDayOffsetFromToday(ms);
+      if (off === 0) return '';
+      if (off === -1) return 'Вчера';
+      if (off === 1) return 'Завтра';
+      const d = new Date(ms);
+      return RU_WEEKDAYS_SHORT[d.getDay()] + ' ' + String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+
+    // 'Завтра, четверг 13 ноября' / 'Понедельник, 10 ноября'
+    function formatEpgDayDivider(ms) {
+      const off = getDayOffsetFromToday(ms);
+      const d = new Date(ms);
+      const wd = RU_WEEKDAYS_FULL[d.getDay()];
+      const dm = d.getDate() + ' ' + RU_MONTHS_GENITIVE[d.getMonth()];
+      if (off === 0) return 'Сегодня, ' + wd + ' ' + dm;
+      if (off === -1) return 'Вчера, ' + wd + ' ' + dm;
+      if (off === 1) return 'Завтра, ' + wd + ' ' + dm;
+      return wd.charAt(0).toUpperCase() + wd.slice(1) + ', ' + dm;
+    }
+
+    // Prefix a clock string with the day label when it is not today (player OSD archive)
+    function withEpgDayPrefix(ms, clockStr) {
+      const p = formatEpgDayPrefix(ms);
+      return p ? (p + ' ' + clockStr) : clockStr;
+    }
+
+    function isEpgSlotInArchive(ch, slot, now) {
+      if (!ch || !ch.hasCatchup || !slot || !slot.isPast) return false;
+      const days = ch.catchupDays || 7;
+      return slot.startMs >= now - days * 86400000;
+    }
+
+    // ─── Virtualized EPG list (full 7d archive + 3d ahead window for selected channel) ───
+    const EPG_WINDOW_SIZE = 450;
+    const EPG_WINDOW_MARGIN = 8;
+
+    function buildEpgItemRowHtml(slot, idx, ch, now, isFocused) {
+      const isArch = isEpgSlotInArchive(ch, slot, now);
+      const cls = 'epg-item'
+        + (slot.isLive ? ' live-epg' : '')
+        + (isArch ? ' arch-epg' : (slot.isPast ? ' past-epg' : ''))
+        + (isFocused ? ' focused' : '');
+      const dayPrefix = formatEpgDayPrefix(slot.startMs);
+      return `<div id="epg-slot-${idx}" class="${cls}" onclick="onEpgSlotClick(${idx})">`
+        + `<span class="epg-time">${dayPrefix ? '<span class="epg-date">' + dayPrefix + '</span>' : ''}${slot.timeStr}</span>`
+        + (isArch ? '<span class="badge-arch-amber">▶ АРХИВ</span>' : '')
+        + (slot.isLive ? '<span class="badge-live">● ЭФИР</span>' : '')
+        + `<span class="epg-title">${escapeHtml(slot.title)}</span>`
+        + '</div>';
+    }
+
+    function stepEpgWindowMore(delta) {
+      const total = (state.currentEpgItems || []).length;
+      if (total === 0) return;
+      state.isFocusInSidePanel = true;
+      state.focusedEpgIdx = Math.max(0, Math.min(total - 1, state.focusedEpgIdx + delta));
+      updateEpgFocus(delta > 0 ? 1 : -1);
+    }
+
+    // Full (re)render of the EPG window. pinDir: +1 / -1 keeps the cursor pinned to the bottom / top edge.
+    function renderEpgPanel(pinDir) {
       const panel = document.getElementById('epg-panel');
       panel.classList.toggle('focused-panel', state.isFocusInSidePanel);
       document.getElementById('epg-header-btn').textContent = state.isFocusInSidePanel ? '◀ К каналам' : '▶ В программу';
 
       const list = document.getElementById('epg-list');
       const ch = state.filteredChannels[state.focusedChannelIdx];
-      list.innerHTML = state.currentEpgItems.map((slot, idx) => {
-        const isFocused = state.isFocusInSidePanel && idx === state.focusedEpgIdx;
-        return `
-          <div id="epg-slot-${idx}" class="epg-item ${slot.isLive ? 'live-epg' : ''} ${isFocused ? 'focused' : ''}" onclick="onEpgSlotClick(${idx})">
-            <span class="epg-time">${slot.timeStr}</span>
-            ${slot.isPast && ch && ch.hasCatchup ? '<span class="badge-arch">АРХ</span>' : ''}
-            ${slot.isLive ? '<span class="badge-live">● ЭФИР</span>' : ''}
-            <span class="epg-title">${escapeHtml(slot.title)}</span>
-          </div>
-        `;
-      }).join('');
+      const items = state.currentEpgItems || [];
+      const total = items.length;
+      const now = Date.now();
+      const focusIdx = Math.max(0, Math.min(state.focusedEpgIdx, total - 1));
 
-      const activeEl = document.getElementById('epg-slot-' + state.focusedEpgIdx);
-      if (activeEl) safeScrollIntoView(activeEl);
+      const half = Math.floor(EPG_WINDOW_SIZE / 2);
+      const start = Math.max(0, Math.min(focusIdx - half, total - EPG_WINDOW_SIZE));
+      const end = Math.min(total, start + EPG_WINDOW_SIZE);
+      const chId = ch ? ch.id : null;
+      const sameLayout = state.epgRenderedChannelId === chId && state.epgWindowStart === start && state.epgWindowEnd === end;
+      const oldScrollTop = list.scrollTop;
+
+      const html = [];
+      if (start > 0) {
+        html.push(`<div class="epg-more-row" style="cursor:pointer;" onclick="stepEpgWindowMore(-40)">▲ Ещё ${start} передач выше</div>`);
+      }
+      const todayKey = getLocalDayKey(now);
+      for (let i = start; i < end; i++) {
+        const slot = items[i];
+        const dk = getLocalDayKey(slot.startMs);
+        const prevDk = i > start ? getLocalDayKey(items[i - 1].startMs) : todayKey;
+        if (dk !== prevDk) {
+          // Non-focusable day divider (rendered only in HTML, never part of currentEpgItems indexes)
+          html.push(`<div class="epg-day-divider">── ${formatEpgDayDivider(slot.startMs)} ──</div>`);
+        }
+        html.push(buildEpgItemRowHtml(slot, i, ch, now, state.isFocusInSidePanel && i === focusIdx));
+      }
+      if (end < total) {
+        html.push(`<div class="epg-more-row" style="cursor:pointer;" onclick="stepEpgWindowMore(40)">▼ Ещё ${total - end} передач ниже</div>`);
+      } else if (!state.currentEpgIsFallback && total > 0 && items[total - 1].endMs < now + 3 * 3600000) {
+        html.push('<div class="epg-end-note">Программа передач дальше не опубликована источником EPG</div>');
+      }
+      list.innerHTML = html.join('');
+
+      state.epgWindowStart = start;
+      state.epgWindowEnd = end;
+      state.epgRenderedChannelId = chId;
+
+      const activeEl = document.getElementById('epg-slot-' + focusIdx);
+      if (!activeEl) return;
+      if (pinDir > 0) {
+        list.scrollTop = Math.max(0, activeEl.offsetTop + activeEl.offsetHeight - list.clientHeight + 2);
+      } else if (pinDir < 0) {
+        list.scrollTop = Math.max(0, activeEl.offsetTop - 2);
+      } else if (sameLayout) {
+        // Periodic refresh of the same window: keep the scroll position stable
+        list.scrollTop = oldScrollTop;
+        if (state.isFocusInSidePanel) {
+          scrollElementEdgePinned(activeEl, list);
+        }
+      } else {
+        // New channel / new window: show the cursor (live programme) in the upper third
+        list.scrollTop = Math.max(0, activeEl.offsetTop - Math.round(list.clientHeight * 0.3));
+      }
+    }
+
+    // Lightweight cursor move for D-pad: toggles classes when the target row is already rendered,
+    // re-renders the 40-row window only near its edges.
+    function updateEpgFocus(pinDir) {
+      const panel = document.getElementById('epg-panel');
+      panel.classList.toggle('focused-panel', state.isFocusInSidePanel);
+      document.getElementById('epg-header-btn').textContent = state.isFocusInSidePanel ? '◀ К каналам' : '▶ В программу';
+      const ch = state.filteredChannels[state.focusedChannelIdx];
+      const total = (state.currentEpgItems || []).length;
+      const idx = state.focusedEpgIdx;
+      const ws = state.epgWindowStart;
+      const we = state.epgWindowEnd;
+      const inWindow = ws >= 0
+        && state.epgRenderedChannelId === (ch ? ch.id : null)
+        && idx >= ws + (ws > 0 ? EPG_WINDOW_MARGIN : 0)
+        && idx <= we - (we < total ? EPG_WINDOW_MARGIN : 1);
+      const targetEl = inWindow ? document.getElementById('epg-slot-' + idx) : null;
+      if (!targetEl) {
+        renderEpgPanel(pinDir || 0);
+        return;
+      }
+      const list = document.getElementById('epg-list');
+      const prev = list.querySelector('.epg-item.focused');
+      if (prev && prev !== targetEl) prev.classList.remove('focused');
+      if (state.isFocusInSidePanel) {
+        targetEl.classList.add('focused');
+      } else {
+        targetEl.classList.remove('focused');
+      }
+      scrollElementEdgePinned(targetEl, list);
     }
 
     function onEpgSlotClick(idx) {
       state.isFocusInSidePanel = true;
       state.focusedEpgIdx = idx;
-      renderEpgPanel();
+      updateEpgFocus(0);
       const slot = state.currentEpgItems[idx];
       if (!slot) return;
       if (slot.isLive) {
@@ -3824,11 +4541,141 @@
       state.isFocusInTopBar = false;
       state.isFocusInSidePanel = !state.isFocusInSidePanel;
       renderChannelsList(true);
-      renderEpgPanel();
+      updateEpgFocus(0);
       updateHintBar();
     }
 
-    // ─── Multi-Engine Video Playback (NATIVE / AUTO / DIRECT / MSX) ────────────
+    // ─── Multi-Engine Video Playback & Zero-Traffic DoH Resolver ───────────────
+    var clientDohCache = {};
+    var streamResolveCache = {};
+    var CLIENT_DOH_TTL_MS = 20 * 60 * 1000;
+
+    function isValidPublicIpv4Str(ip) {
+      if (!ip || typeof ip !== 'string') return false;
+      var parts = ip.trim().split('.');
+      if (parts.length !== 4) return false;
+      var a = parseInt(parts[0], 10);
+      var b = parseInt(parts[1], 10);
+      var c = parseInt(parts[2], 10);
+      var d = parseInt(parts[3], 10);
+      if (isNaN(a) || isNaN(b) || isNaN(c) || isNaN(d)) return false;
+      if (a <= 0 || a === 10 || a === 127 || a >= 224) return false;
+      if (a === 169 && b === 254) return false;
+      if (a === 192 && b === 168) return false;
+      if (a === 172 && b >= 16 && b <= 31) return false;
+      return true;
+    }
+
+    function resolveHostViaClientDoh(hostname, cb) {
+      if (!hostname) { cb(''); return; }
+      var cleanHost = String(hostname).trim().toLowerCase();
+      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(cleanHost)) {
+        cb(cleanHost);
+        return;
+      }
+      var now = Date.now();
+      var cached = clientDohCache[cleanHost];
+      if (cached && cached.exp > now) {
+        cb(cached.ip);
+        return;
+      }
+
+      var endpoints = [
+        'https://cloudflare-dns.com/dns-query?name=' + encodeURIComponent(cleanHost) + '&type=A',
+        'https://dns.google/resolve?name=' + encodeURIComponent(cleanHost) + '&type=1',
+        '/api/tv/resolve?host=' + encodeURIComponent(cleanHost)
+      ];
+      var idx = 0;
+
+      function tryNext() {
+        if (idx >= endpoints.length) {
+          cb('');
+          return;
+        }
+        var url = endpoints[idx++];
+        try {
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', url, true);
+          xhr.timeout = 2800;
+          xhr.setRequestHeader('Accept', 'application/dns-json, application/json');
+          xhr.onload = function() {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              var data = safeJsonParse(xhr.responseText, null);
+              if (data) {
+                if (data.ip && isValidPublicIpv4Str(data.ip)) {
+                  clientDohCache[cleanHost] = { ip: data.ip, exp: Date.now() + CLIENT_DOH_TTL_MS };
+                  cb(data.ip);
+                  return;
+                }
+                if (Array.isArray(data.Answer)) {
+                  for (var i = 0; i < data.Answer.length; i++) {
+                    var ans = data.Answer[i];
+                    if (ans && ans.type === 1 && ans.data && isValidPublicIpv4Str(ans.data)) {
+                      clientDohCache[cleanHost] = { ip: ans.data, exp: Date.now() + CLIENT_DOH_TTL_MS };
+                      cb(ans.data);
+                      return;
+                    }
+                  }
+                }
+              }
+            }
+            tryNext();
+          };
+          xhr.onerror = function() { tryNext(); };
+          xhr.ontimeout = function() { tryNext(); };
+          xhr.send();
+        } catch (e) {
+          tryNext();
+        }
+      }
+      tryNext();
+    }
+
+    function unwrapStreamViaResolveApi(rawUrl, cb) {
+      if (!rawUrl || state.dohMode === 'OFF') {
+        cb({ resolvedUrl: rawUrl, ipUrl: rawUrl });
+        return;
+      }
+      var now = Date.now();
+      var cached = streamResolveCache[rawUrl];
+      if (cached && cached.exp > now) {
+        cb(cached);
+        return;
+      }
+      var apiUrl = '/api/tv/resolve?url=' + encodeURIComponent(rawUrl);
+      xhrRequestJson('GET', apiUrl, null, function(err, data) {
+        if (!err && data && data.ok && data.resolvedUrl) {
+          var entry = {
+            resolvedUrl: data.resolvedUrl,
+            ipUrl: data.ipUrl || data.resolvedUrl,
+            ip: data.ip || '',
+            host: data.host || '',
+            exp: Date.now() + CLIENT_DOH_TTL_MS
+          };
+          streamResolveCache[rawUrl] = entry;
+          cb(entry);
+          return;
+        }
+        // Fallback to client-side DoH resolution on the URL's host if /api/tv/resolve didn't unwrap
+        try {
+          var u = new URL(rawUrl);
+          if (u.protocol === 'http:') {
+            resolveHostViaClientDoh(u.hostname, function(ip) {
+              var ipUrl = rawUrl;
+              if (ip && ip !== u.hostname) {
+                ipUrl = rawUrl.replace('://' + u.hostname, '://' + ip);
+              }
+              var entry = { resolvedUrl: rawUrl, ipUrl: ipUrl, ip: ip, host: u.hostname, exp: Date.now() + CLIENT_DOH_TTL_MS };
+              streamResolveCache[rawUrl] = entry;
+              cb(entry);
+            });
+            return;
+          }
+        } catch (e) {}
+        cb({ resolvedUrl: rawUrl, ipUrl: rawUrl });
+      });
+    }
+
     function buildPlayableStreamUrl(rawUrl, useProxy) {
       if (!rawUrl) return '';
       if (useProxy) {
@@ -4166,6 +5013,8 @@
       }
 
       function scheduleWatchdog(ms, onStall) {
+        if (isPreview && state.previewWatchdogTimer) clearTimeout(state.previewWatchdogTimer);
+        if (!isPreview && state.fullscreenWatchdogTimer) clearTimeout(state.fullscreenWatchdogTimer);
         var timer = setTimeout(function() {
           if (isStaleLoad()) return;
           if (!videoEl || (videoEl.currentTime === 0 && videoEl.readyState < 3)) {
@@ -4178,8 +5027,13 @@
 
       // Pipeline A: Smart TV (LG webOS / Samsung Tizen) or explicit NATIVE mode on TV
       if ((smartTv && engine !== 'AUTO') || (!window.Hls || !Hls.isSupported())) {
+        var stage2Started = false;
+        var stage3Started = false;
         function fallbackTvStage3Hls() {
-          if (isStaleLoad()) return;
+          if (isStaleLoad() || stage3Started) return;
+          stage3Started = true;
+          clearTimeout(state.previewWatchdogTimer);
+          clearTimeout(state.fullscreenWatchdogTimer);
           if (!startHlsJsWithUrl(proxiedUrl, function() {
             startHlsJsWithUrl(rawStreamUrl, null);
           })) {
@@ -4187,7 +5041,10 @@
           }
         }
         function fallbackTvStage2ProxyNative() {
-          if (isStaleLoad()) return;
+          if (isStaleLoad() || stage2Started) return;
+          stage2Started = true;
+          clearTimeout(state.previewWatchdogTimer);
+          clearTimeout(state.fullscreenWatchdogTimer);
           playNativeUrl(proxiedUrl, fallbackTvStage3Hls);
           scheduleWatchdog(watchdogTimeoutMs, fallbackTvStage3Hls);
         }
@@ -4199,9 +5056,14 @@
       // Pipeline B: Smartphones / Tablets / PC or AUTO mode
       var firstHlsUrl = (engine === 'DIRECT') ? rawStreamUrl : proxiedUrl;
       var secondHlsUrl = (engine === 'DIRECT') ? proxiedUrl : rawStreamUrl;
+      var mobileStage2Started = false;
+      var mobileStage3Started = false;
 
       function fallbackMobileStage3Native() {
-        if (isStaleLoad()) return;
+        if (isStaleLoad() || mobileStage3Started) return;
+        mobileStage3Started = true;
+        clearTimeout(state.previewWatchdogTimer);
+        clearTimeout(state.fullscreenWatchdogTimer);
         if (state.previewHls) { try { state.previewHls.destroy(); } catch (e) {} state.previewHls = null; }
         if (state.fullscreenHls) { try { state.fullscreenHls.destroy(); } catch (e) {} state.fullscreenHls = null; }
         playNativeUrl(rawStreamUrl, function() {
@@ -4209,7 +5071,10 @@
         });
       }
       function fallbackMobileStage2Hls() {
-        if (isStaleLoad()) return;
+        if (isStaleLoad() || mobileStage2Started) return;
+        mobileStage2Started = true;
+        clearTimeout(state.previewWatchdogTimer);
+        clearTimeout(state.fullscreenWatchdogTimer);
         if (!startHlsJsWithUrl(secondHlsUrl, fallbackMobileStage3Native)) {
           fallbackMobileStage3Native();
         } else {
@@ -4250,9 +5115,15 @@
     }
 
     function resolveProgramForTimestamp(ch, targetMs) {
-      const slots = state.currentEpgItems || [];
+      // Only use side-panel slots when they belong to THIS channel (player may have zapped to another one)
+      const slots = (state.currentEpgChannelId === ch.id) ? (state.currentEpgItems || []) : [];
       const found = slots.find(s => targetMs >= s.startMs && targetMs < s.endMs);
       if (found) return found;
+      const cached = getCachedChannelSchedule(ch.id, true);
+      if (cached) {
+        const p = cached.find(x => targetMs >= x.s && targetMs < x.e);
+        if (p) return { startMs: p.s, endMs: p.e, title: cleanDisplayText(p.t) || p.t || '' };
+      }
       const live = state.liveEpgByChannelId[ch.id];
       if (live && targetMs >= live.s && targetMs < live.e) {
         return { startMs: live.s, endMs: live.e, title: live.t };
@@ -4419,17 +5290,17 @@
 
       const pStart = state.playerProgramStartMs || (displayMs - 1800000);
       const pEnd = state.playerProgramEndMs || (pStart + 3600000);
-      const pRange = `${formatClockHm(pStart)}–${formatClockHm(pEnd)}`;
+      const pRange = withEpgDayPrefix(pStart, `${formatClockHm(pStart)}–${formatClockHm(pEnd)}`);
       const pTitle = state.playerProgramTitle || ch.name;
 
       if (state.pendingSeekTargetMs !== null) {
         const baseMs = state.seekBaseTimeMs || getCurrentPlaybackBroadcastMs();
         const deltaSec = (state.pendingSeekTargetMs - baseMs) / 1000;
         const arrow = deltaSec >= 0 ? '⏩' : '⏪';
-        badge.innerHTML = `<span style="color:#00E5FF; font-weight:800;">${arrow} ПЕРЕМОТКА ${formatSeekDelta(deltaSec)} • ${formatClockHms(displayMs)}</span>`;
-        titleEl.textContent = `${pRange} • ${pTitle} (переход к ${formatClockHms(displayMs)})`;
+        badge.innerHTML = `<span style="color:#00E5FF; font-weight:800;">${arrow} ПЕРЕМОТКА ${formatSeekDelta(deltaSec)} • ${withEpgDayPrefix(displayMs, formatClockHms(displayMs))}</span>`;
+        titleEl.textContent = `${pRange} • ${pTitle} (переход к ${withEpgDayPrefix(displayMs, formatClockHms(displayMs))})`;
       } else if (state.playerCatchupStartMs) {
-        badge.innerHTML = `<span>⏪ АРХИВ ${formatClockHms(displayMs)}</span>`;
+        badge.innerHTML = `<span>⏪ АРХИВ ${withEpgDayPrefix(displayMs, formatClockHms(displayMs))}</span>`;
         titleEl.textContent = `${pRange} • ${pTitle}`;
       } else {
         const epgInfo = formatChannelEpgRow(ch);
@@ -4614,9 +5485,17 @@
         return;
       }
       if (state.filteredChannels.length === 0) return;
+      const total = state.filteredChannels.length;
+      switchPlayerToChannelIndex((state.playerChannelIdx + delta + total) % total);
+    }
+
+    // Switch fullscreen live playback to filteredChannels[idx] (used by CH± and the zap panel)
+    function switchPlayerToChannelIndex(idx) {
+      if (state.filteredChannels.length === 0) return;
+      idx = Math.max(0, Math.min(state.filteredChannels.length - 1, idx));
       clearTimeout(state.seekDebounceTimer);
       state.pendingSeekTargetMs = null;
-      state.playerChannelIdx = (state.playerChannelIdx + delta + state.filteredChannels.length) % state.filteredChannels.length;
+      state.playerChannelIdx = idx;
       state.focusedChannelIdx = state.playerChannelIdx;
       state.playerCatchupStartMs = null;
       const ch = state.filteredChannels[state.playerChannelIdx];
@@ -4625,6 +5504,218 @@
       state.playerProgramEndMs = slot ? slot.endMs : null;
       state.playerProgramTitle = slot ? slot.title : '';
       startFullscreenChannel();
+    }
+
+    // ─── Fullscreen Zap Panel (virtualized channel list over the video) ────────
+    const ZAP_WINDOW_SIZE = 40;
+    const ZAP_WINDOW_MARGIN = 4;
+    const ZAP_AUTO_HIDE_MS = 6000;
+
+    function getZapChannelFolders() {
+      const favCount = state.allChannels.filter(c => state.favorites.has(c.streamUrl)).length;
+      return (state.folders || []).filter(f => {
+        if (!f || f.isVodEntry) return false;
+        if (f.isFavFolder && favCount <= 0 && f.title !== state.zapFolderTitle) return false;
+        return true;
+      });
+    }
+
+    function updateZapHeaderUi() {
+      const icon = getFolderIcon(state.zapFolderTitle);
+      const titleEl = document.getElementById('zap-header-title');
+      const countEl = document.getElementById('zap-header-count');
+      if (titleEl) titleEl.textContent = (icon ? icon + ' ' : '') + (state.zapFolderTitle || 'Каналы');
+      if (countEl) countEl.textContent = '(' + (state.zapChannels ? state.zapChannels.length : 0) + ')';
+    }
+
+    // Returns true when the panel was opened (live TV), false for VOD / empty lists
+    function openZapPanel() {
+      if (state.screen !== 'PLAYER' || state.activeVodPlaybackItem) return false;
+      if (!state.filteredChannels || state.filteredChannels.length === 0) return false;
+      state.zapOpen = true;
+      state.zapFolderTitle = state.selectedFolderTitle || 'Все каналы';
+      state.zapChannels = state.filteredChannels.slice();
+      state.zapFocusIdx = Math.max(0, Math.min(state.playerChannelIdx, state.zapChannels.length - 1));
+      const panel = document.getElementById('player-zap-panel');
+      if (panel) panel.classList.remove('hidden');
+      updateZapHeaderUi();
+      // Hide the OSD so the panel and the video stay clean
+      const osd = document.getElementById('player-osd');
+      clearTimeout(state.osdTimer);
+      if (osd) osd.classList.add('hidden-osd');
+      renderZapPanel(true, 0);
+      resetZapPanelTimer();
+      return true;
+    }
+
+    function switchZapFolder(delta) {
+      if (!state.zapOpen) return;
+      const folders = getZapFolderFoldersForCycle();
+      if (folders.length === 0) return;
+      let curIdx = folders.findIndex(f => f.title === state.zapFolderTitle);
+      if (curIdx < 0) curIdx = 0;
+      const nextIdx = (curIdx + delta + folders.length) % folders.length;
+      const nextFolder = folders[nextIdx];
+      state.zapFolderTitle = nextFolder.title;
+      state.zapChannels = applyChannelSort(buildChannelsForFolderTitle(nextFolder.title));
+      const playingCh = state.filteredChannels[state.playerChannelIdx];
+      const playingId = playingCh ? playingCh.id : -1;
+      const foundPlayingIdx = playingId >= 0 ? state.zapChannels.findIndex(c => c.id === playingId) : -1;
+      state.zapFocusIdx = foundPlayingIdx >= 0 ? foundPlayingIdx : 0;
+      state.zapWindowStart = -1;
+      state.zapWindowEnd = -1;
+      updateZapHeaderUi();
+      renderZapPanel(true, 0);
+      resetZapPanelTimer();
+    }
+
+    function getZapFolderFoldersForCycle() {
+      const list = getZapChannelFolders();
+      if (list.length > 0) return list;
+      buildFolders();
+      return getZapChannelFolders();
+    }
+
+    function closeZapPanel() {
+      clearTimeout(state.zapHideTimer);
+      state.zapHideTimer = null;
+      if (!state.zapOpen) return;
+      state.zapOpen = false;
+      const panel = document.getElementById('player-zap-panel');
+      if (panel) panel.classList.add('hidden');
+      const list = document.getElementById('zap-list');
+      if (list) list.innerHTML = '';
+      state.zapWindowStart = -1;
+      state.zapWindowEnd = -1;
+    }
+
+    function resetZapPanelTimer() {
+      clearTimeout(state.zapHideTimer);
+      if (!state.zapOpen) return;
+      state.zapHideTimer = setTimeout(closeZapPanel, ZAP_AUTO_HIDE_MS);
+    }
+
+    function buildZapRowHtml(ch, i, now) {
+      const playingCh = state.filteredChannels[state.playerChannelIdx];
+      const isPlaying = Boolean(playingCh && ch && ch.id === playingCh.id);
+      const isFocused = i === state.zapFocusIdx;
+      const logoUrl = resolveChannelLogoUrl(ch);
+      const live = state.liveEpgByChannelId[ch.id];
+      const prog = (live && live.t && (!live.e || now < live.e)) ? (cleanDisplayText(live.t) || live.t) : (cleanDisplayText(ch.group) || '');
+      const logoHtml = logoUrl
+        ? `<img src="${escapeHtml(logoUrl)}" alt="" onerror="this.style.display='none'" />`
+        : svgIcon('tv');
+      return `<div id="zap-row-${i}" class="zap-row${isPlaying ? ' playing' : ''}${isFocused ? ' focused' : ''}" onclick="event.stopPropagation(); zapPlayIndex(${i})">`
+        + `<div class="zap-num">${String(i + 1).padStart(2, '0')}</div>`
+        + `<div class="zap-logo">${logoHtml}</div>`
+        + `<div class="zap-info"><div class="zap-name">${escapeHtml(ch.name)}${isPlaying ? '<span class="zap-onair">● В ЭФИРЕ</span>' : ''}</div>`
+        + `<div class="zap-prog">${escapeHtml(prog)}</div></div>`
+        + '</div>';
+    }
+
+    // force=true rebuilds the ~40-row window; otherwise only toggles focus classes when possible.
+    function renderZapPanel(force, pinDir) {
+      if (!state.zapOpen) return;
+      const list = document.getElementById('zap-list');
+      if (!list) return;
+      const channels = state.zapChannels || state.filteredChannels;
+      const total = channels.length;
+      if (total === 0) {
+        list.innerHTML = '<div class="zap-more">Нет каналов в папке</div>';
+        return;
+      }
+      const idx = Math.max(0, Math.min(state.zapFocusIdx, total - 1));
+      const ws = state.zapWindowStart;
+      const we = state.zapWindowEnd;
+      const inWindow = !force && ws >= 0
+        && idx >= ws + (ws > 0 ? ZAP_WINDOW_MARGIN : 0)
+        && idx <= we - (we < total ? ZAP_WINDOW_MARGIN : 1);
+      if (inWindow) {
+        const target = document.getElementById('zap-row-' + idx);
+        if (target) {
+          const prev = list.querySelector('.zap-row.focused');
+          if (prev && prev !== target) prev.classList.remove('focused');
+          target.classList.add('focused');
+          scrollElementEdgePinned(target, list);
+          return;
+        }
+      }
+
+      const half = Math.floor(ZAP_WINDOW_SIZE / 2);
+      const start = Math.max(0, Math.min(idx - half, total - ZAP_WINDOW_SIZE));
+      const end = Math.min(total, start + ZAP_WINDOW_SIZE);
+      const now = Date.now();
+      const html = [];
+      if (start > 0) {
+        html.push(`<div class="zap-more" onclick="event.stopPropagation(); moveZapFocus(-${ZAP_WINDOW_SIZE / 2})">▲ Ещё ${start} кан. выше</div>`);
+      }
+      for (let i = start; i < end; i++) {
+        html.push(buildZapRowHtml(channels[i], i, now));
+      }
+      if (end < total) {
+        html.push(`<div class="zap-more" onclick="event.stopPropagation(); moveZapFocus(${ZAP_WINDOW_SIZE / 2})">▼ Ещё ${total - end} кан. ниже</div>`);
+      }
+      list.innerHTML = html.join('');
+      state.zapWindowStart = start;
+      state.zapWindowEnd = end;
+
+      const activeEl = document.getElementById('zap-row-' + idx);
+      if (!activeEl) return;
+      if (pinDir > 0) {
+        list.scrollTop = Math.max(0, activeEl.offsetTop + activeEl.offsetHeight - list.clientHeight + 2);
+      } else if (pinDir < 0) {
+        list.scrollTop = Math.max(0, activeEl.offsetTop - 2);
+      } else {
+        list.scrollTop = Math.max(0, activeEl.offsetTop - Math.round((list.clientHeight - activeEl.offsetHeight) / 2));
+      }
+    }
+
+    // Single steps wrap around the list, page jumps (CH± = 10) clamp at the ends
+    function moveZapFocus(delta) {
+      if (!state.zapOpen) return;
+      const channels = state.zapChannels || state.filteredChannels;
+      const total = channels.length;
+      if (total === 0) return;
+      let next = state.zapFocusIdx + delta;
+      let wrapped = false;
+      if (Math.abs(delta) === 1) {
+        if (next < 0) { next = total - 1; wrapped = true; }
+        else if (next >= total) { next = 0; wrapped = true; }
+      } else {
+        next = Math.max(0, Math.min(total - 1, next));
+      }
+      state.zapFocusIdx = next;
+      renderZapPanel(wrapped, wrapped ? 0 : (delta > 0 ? 1 : -1));
+      resetZapPanelTimer();
+    }
+
+    function zapPlayIndex(idx) {
+      if (!state.zapOpen) return;
+      const channels = state.zapChannels || state.filteredChannels;
+      const targetCh = channels[idx];
+      if (!targetCh) return;
+      const playingCh = state.filteredChannels[state.playerChannelIdx];
+      const alreadyPlayingLive = Boolean(playingCh && playingCh.id === targetCh.id && !state.playerCatchupStartMs);
+
+      // Commit the folder chosen in the zap panel as the active folder
+      if (state.zapFolderTitle && Array.isArray(state.zapChannels) && state.zapChannels.length > 0) {
+        state.selectedFolderTitle = state.zapFolderTitle;
+        state.filteredChannels = state.zapChannels.slice();
+        const folderIdx = (state.folders || []).findIndex(f => f && f.title === state.zapFolderTitle);
+        if (folderIdx >= 0) state.focusedFolderIdx = folderIdx;
+      }
+
+      closeZapPanel();
+      if (alreadyPlayingLive) {
+        state.playerChannelIdx = idx;
+        state.focusedChannelIdx = idx;
+        const num = String(idx + 1).padStart(2, '0');
+        const fsTitle = document.getElementById('fs-ch-title');
+        if (fsTitle) fsTitle.textContent = `${num}. ${targetCh.name}`;
+        wakePlayerOsd();
+        return;
+      }
+      switchPlayerToChannelIndex(idx);
     }
 
     function seekPlayer(direction, isRepeat = false) {
@@ -4734,6 +5825,7 @@
     }
 
     function closeFullscreenPlayer() {
+      closeZapPanel();
       clearTimeout(state.seekDebounceTimer);
       clearTimeout(state.fullscreenWatchdogTimer);
       state.pendingSeekTargetMs = null;
@@ -4786,6 +5878,8 @@
       state.isFocusInTopBar = false;
       state.settingsScaleDropdownOpen = false;
       renderSettingsScaleDropdown();
+      state.sortDropdownOpen = false;
+      renderChannelSortDropdown();
       renderTopBarFocus();
       if (!isBackStep && target !== 'FOLDERS') {
         pushBackGuard(target.toLowerCase());
@@ -6470,6 +7564,26 @@
       });
     }
 
+    const DOH_DESCRIPTIONS = {
+      AUTO: 'Умный режим (по умолчанию): автоматическое резервирование по стандарту DNS-over-HTTPS (Cloudflare 1.1.1.1 / Google 8.8.8.8) при сбоях или некорректных ответах локального DNS роутера / оператора',
+      ALWAYS: 'Всегда использовать защищённый стандарт DNS-over-HTTPS (Cloudflare 1.1.1.1 / Google Public DNS 8.8.8.8) для прямого разрешения адресов серверов вещания',
+      OFF: 'Отключено: используется стандартный системный DNS роутера / интернет-провайдера'
+    };
+
+    function setDohMode(mode) {
+      const clean = (mode === 'ALWAYS' || mode === 'OFF') ? mode : 'AUTO';
+      state.dohMode = clean;
+      safeStorageSet('minoga_tv_doh_mode', clean);
+      ['AUTO', 'ALWAYS', 'OFF'].forEach(m => {
+        const b = document.getElementById('doh-' + m);
+        if (b) b.classList.toggle('active', m === clean);
+      });
+      const desc = document.getElementById('doh-mode-desc');
+      if (desc && DOH_DESCRIPTIONS[clean]) {
+        desc.textContent = DOH_DESCRIPTIONS[clean];
+      }
+    }
+
     // ─── Search Modal with Classic On-Screen Remote Keyboard (АБВГД / ABCDEF) ──
     const TV_KB_LAYOUTS = {
       RU: [
@@ -6734,7 +7848,7 @@
 
     function playSearchChannel(id) {
       closeSearchModal();
-      state.filteredChannels = state.allChannels;
+      state.filteredChannels = applyChannelSort(state.allChannels);
       state.selectedFolderTitle = 'Все каналы';
       const idx = state.filteredChannels.findIndex(c => c.id === id);
       if (idx >= 0) {
@@ -6786,8 +7900,19 @@
         closeAddPlaylistModal();
         return;
       }
+      if (state.screen === 'PLAYER' && state.zapOpen) {
+        // Back closes the channel list overlay first, the video keeps playing
+        closeZapPanel();
+        wakePlayerOsd();
+        return;
+      }
       if (state.screen === 'PLAYER') {
         closeFullscreenPlayer();
+        return;
+      }
+      if (state.sortDropdownOpen) {
+        state.sortDropdownOpen = false;
+        renderChannelSortDropdown();
         return;
       }
       if (state.isFocusInTopBar) {
@@ -6811,7 +7936,7 @@
         if (state.isFocusInSidePanel) {
           state.isFocusInSidePanel = false;
           renderChannelsList(false);
-          renderEpgPanel();
+          updateEpgFocus(0);
         } else {
           switchScreen('FOLDERS', true);
         }
@@ -7123,11 +8248,39 @@
           seekPlayer(1, Boolean(e.repeat));
           return;
         }
-        if (isUp || isChUp) {
+        // 4a. Zap panel (channel list over the video) owns ▲▼ / ◄► / CH± / OK while open
+        if (state.zapOpen) {
+          if (isUp) {
+            moveZapFocus(-1);
+          } else if (isDown) {
+            moveZapFocus(1);
+          } else if (isChUp) {
+            moveZapFocus(-10);
+          } else if (isChDown) {
+            moveZapFocus(10);
+          } else if (isEnter) {
+            zapPlayIndex(state.zapFocusIdx);
+          } else if (isLeft) {
+            switchZapFolder(-1);
+          } else if (isRight) {
+            switchZapFolder(1);
+          } else {
+            resetZapPanelTimer();
+          }
+          return;
+        }
+        if (isUp || isDown) {
+          // Live TV: ▲▼ open the channel list overlay; VOD: ▲▼ keep switching episodes
+          if (state.activeVodPlaybackItem || !openZapPanel()) {
+            stepPlayerVodOrChannel(isUp ? -1 : 1);
+          }
+          return;
+        }
+        if (isChUp) {
           stepPlayerVodOrChannel(-1);
           return;
         }
-        if (isDown || isChDown) {
+        if (isChDown) {
           stepPlayerVodOrChannel(1);
           return;
         }
@@ -7167,6 +8320,23 @@
       // 5. TopBar Focus Zone (Dynamic: VOD shows ⭐ Избранное and 🕒 История; other screens hide them)
       if (state.isFocusInTopBar) {
         e.preventDefault();
+        // Channel sort dropdown (⇅) navigation: ▲▼ move, OK select, Back closes (handleBackAction)
+        if (state.sortDropdownOpen) {
+          if (isDown) {
+            state.sortDropdownFocusIdx = Math.min(CHANNEL_SORT_OPTIONS.length - 1, state.sortDropdownFocusIdx + 1);
+            renderChannelSortDropdown();
+          } else if (isUp) {
+            state.sortDropdownFocusIdx = Math.max(0, state.sortDropdownFocusIdx - 1);
+            renderChannelSortDropdown();
+          } else if (isEnter) {
+            const opt = CHANNEL_SORT_OPTIONS[state.sortDropdownFocusIdx] || CHANNEL_SORT_OPTIONS[0];
+            setChannelSortMode(opt.mode);
+          } else if (isLeft || isRight) {
+            state.sortDropdownOpen = false;
+            renderChannelSortDropdown();
+          }
+          return;
+        }
         const activeTopIds = getActiveTopBarButtonIds();
         if (isRight) {
           state.topBarIdx = Math.min(activeTopIds.length - 1, state.topBarIdx + 1);
@@ -7401,15 +8571,21 @@
               renderTopBarFocus();
             } else {
               state.focusedEpgIdx = Math.max(0, state.focusedEpgIdx - 1);
-              renderEpgPanel();
+              updateEpgFocus(-1);
             }
           } else if (isDown) {
-            state.focusedEpgIdx = Math.min(state.currentEpgItems.length - 1, state.focusedEpgIdx + 1);
-            renderEpgPanel();
+            state.focusedEpgIdx = Math.max(0, Math.min(state.currentEpgItems.length - 1, state.focusedEpgIdx + 1));
+            updateEpgFocus(1);
+          } else if (isChUp) {
+            state.focusedEpgIdx = Math.max(0, state.focusedEpgIdx - 8);
+            updateEpgFocus(-1);
+          } else if (isChDown) {
+            state.focusedEpgIdx = Math.max(0, Math.min(state.currentEpgItems.length - 1, state.focusedEpgIdx + 8));
+            updateEpgFocus(1);
           } else if (isLeft) {
             state.isFocusInSidePanel = false;
             renderChannelsList(false);
-            renderEpgPanel();
+            updateEpgFocus(0);
           } else if (isEnter) {
             onEpgSlotClick(state.focusedEpgIdx);
           }
@@ -7432,7 +8608,7 @@
           } else if (isRight) {
             state.isFocusInSidePanel = true;
             renderChannelsList(false);
-            renderEpgPanel();
+            updateEpgFocus(0);
           } else if (isLeft) {
             switchScreen('FOLDERS');
           } else if (isEnter) {

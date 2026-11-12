@@ -15,6 +15,11 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -67,6 +72,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.minogatv.box.feature.channels.ChannelDesignTokens
+import com.minogatv.box.feature.channels.EpgDateFormat
 import com.minogatv.box.feature.ui.LocalScreenKeyDispatcher
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.Alignment
@@ -92,6 +98,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import com.minogatv.box.core.network.SmartDohDns
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -158,7 +166,9 @@ fun PlayerScreen(
     var focusedControlIndex by remember { mutableIntStateOf(2) } // Default: 2 = Play/Pause
 
     BackHandler {
-        if (uiState.isCatchupMode) {
+        if (uiState.isZapOpen) {
+            viewModel.closeZapOverlay()
+        } else if (uiState.isCatchupMode) {
             pendingSeekTargetTimeMs = null
             seekRepeatCount = 0
             seekDebounceJob?.cancel()
@@ -229,16 +239,12 @@ fun PlayerScreen(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // 4. HTTP Data Source with cross-protocol redirect support and IPTV-accepted User-Agent
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent(
-                uiState.playlist?.userAgent?.takeIf { it.isNotBlank() }
-                    ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            )
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(30_000)
-            .setAllowCrossProtocolRedirects(true)
-            .setKeepPostFor302Redirects(true)
+        // 4. HTTP Data Source with Smart DoH (DNS-over-HTTPS) to bypass ISP DNS blocks & cross-protocol redirects
+        val userAgent = uiState.playlist?.userAgent?.takeIf { it.isNotBlank() }
+            ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        val httpDataSourceFactory = OkHttpDataSource.Factory(
+            SmartDohDns.getStreamingOkHttpClient(context, userAgent)
+        ).setUserAgent(userAgent)
 
         val mediaSourceFactory = DefaultMediaSourceFactory(httpDataSourceFactory)
             .setLoadErrorHandlingPolicy(loadErrorPolicy)
@@ -440,10 +446,7 @@ fun PlayerScreen(
         val newTarget = (baseTargetTime + delta).coerceIn(minArchiveMs, maxArchiveMs)
         pendingSeekTargetTimeMs = newTarget
 
-        val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-        val dateFmt = SimpleDateFormat("dd.MM HH:mm:ss", Locale.getDefault())
-        val isToday = android.text.format.DateUtils.isToday(newTarget)
-        val targetTimeStr = if (isToday) timeFmt.format(Date(newTarget)) else dateFmt.format(Date(newTarget))
+        val targetTimeStr = EpgDateFormat.timestampLabel(newTarget)
 
         val totalDeltaMs = newTarget - currentStreamTimeMs
         val totalDeltaSec = kotlin.math.abs(totalDeltaMs) / 1000L
@@ -543,15 +546,41 @@ fun PlayerScreen(
             // Any key press resets the screensaver timer
             viewModel.onUserInteraction()
 
+            // ── Channel zap overlay captures navigation keys while open ──
+            if (uiState.isZapOpen) {
+                return@rememberUpdatedState when (nativeEvent.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> { viewModel.moveZapFocus(-1); true }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> { viewModel.moveZapFocus(1); true }
+                    KeyEvent.KEYCODE_CHANNEL_UP,
+                    KeyEvent.KEYCODE_PAGE_UP -> { viewModel.moveZapFocus(-10); true }
+                    KeyEvent.KEYCODE_CHANNEL_DOWN,
+                    KeyEvent.KEYCODE_PAGE_DOWN -> { viewModel.moveZapFocus(10); true }
+                    KeyEvent.KEYCODE_DPAD_LEFT -> { viewModel.switchZapFolder(-1); true }
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> { viewModel.switchZapFolder(1); true }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> { viewModel.confirmZapSelection(); true }
+                    KeyEvent.KEYCODE_BACK,
+                    KeyEvent.KEYCODE_ESCAPE -> { viewModel.closeZapOverlay(); true }
+                    else -> false
+                }
+            }
+
             when (nativeEvent.keyCode) {
+                // CH+ / CH− with the overlay closed keep switching channels immediately
+                KeyEvent.KEYCODE_CHANNEL_UP -> {
+                    viewModel.nextChannel()
+                    true
+                }
+                KeyEvent.KEYCODE_CHANNEL_DOWN -> {
+                    viewModel.previousChannel()
+                    true
+                }
                 KeyEvent.KEYCODE_DPAD_UP,
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
                     if (!uiState.isCatchupMode) {
-                        if (nativeEvent.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                            viewModel.previousChannel()
-                        } else {
-                            viewModel.nextChannel()
-                        }
+                        // First ▲/▼ opens the transparent channel list instead of switching
+                        viewModel.openZapOverlay()
                         true
                     } else {
                         viewModel.showOsd()
@@ -674,10 +703,29 @@ fun PlayerScreen(
         focusRequester.requestFocus()
     }
 
+    // When the global touch-remote is off, a vertical swipe still opens the channel overlay.
+    // (With it on, MainActivity converts swipes into DPAD_UP/DOWN which open the overlay too.)
+    val touchRemoteEnabled = remember { prefs.getBoolean("touch_gestures_enabled", true) }
+    val swipeToZapModifier = if (!touchRemoteEnabled) {
+        Modifier.pointerInput(Unit) {
+            var total = 0f
+            detectVerticalDragGestures(
+                onDragStart = { total = 0f },
+                onDragEnd = {
+                    if (kotlin.math.abs(total) > 60f && !currentUiState.isCatchupMode && !currentUiState.isZapOpen) {
+                        viewModel.openZapOverlay()
+                    }
+                },
+                onVerticalDrag = { _, dy -> total += dy },
+            )
+        }
+    } else Modifier
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .then(swipeToZapModifier)
             .focusRequester(focusRequester)
             .focusable()
             .clickable(
@@ -1080,8 +1128,9 @@ fun PlayerScreen(
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (uiState.isCatchupMode) {
+                                        val archiveLabel = EpgDateFormat.programLabel(currProg.startMs, currProg.endMs, separator = " - ")
                                         Text(
-                                            text = "⏪ $startStr - $endStr  ${currProg.title}  ($timePosStr)",
+                                            text = "⏪ $archiveLabel  ${currProg.title}  ($timePosStr)",
                                             color = ChannelDesignTokens.NeonCyan,
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold,
@@ -1119,8 +1168,7 @@ fun PlayerScreen(
                                 )
                             } else {
                                 val activeTimestamp = pendingSeekTargetTimeMs ?: currentStreamTimeMs
-                                val timeFmt = remember { SimpleDateFormat("dd.MM HH:mm:ss", Locale.getDefault()) }
-                                val dateStr = timeFmt.format(Date(activeTimestamp))
+                                val dateStr = EpgDateFormat.timestampLabel(activeTimestamp)
                                 Text(
                                     text = if (uiState.isCatchupMode) "⏪ Архив: $dateStr" else (uiState.channel?.name ?: "Прямой эфир"),
                                     color = Color.White,
@@ -1251,8 +1299,8 @@ fun PlayerScreen(
                             )
                         } else {
                             listOfNotNull(
-                                RemoteHint(keyLabel = "▲▼", action = "Канал") {
-                                    viewModel.nextChannel()
+                                RemoteHint(keyLabel = "▲▼", action = "Список каналов") {
+                                    viewModel.openZapOverlay()
                                 },
                                 RemoteHint(keyLabel = "◄►", action = "Кнопки плеера"),
                                 RemoteHint(keyLabel = "OK", action = "Выбор / Пауза") {
@@ -1312,6 +1360,29 @@ fun PlayerScreen(
                     fontWeight = FontWeight.Bold,
                 )
             }
+        }
+
+        // ─── Channel Zap Overlay (▲/▼ in live mode, ◄/► switches folder) ─────
+        AnimatedVisibility(
+            visible = uiState.isZapOpen && !uiState.isCatchupMode,
+            enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.CenterStart),
+        ) {
+            ChannelZapOverlay(
+                folderTitle = uiState.zapFolderTitle,
+                channels = uiState.zapChannelList.ifEmpty { uiState.channelList },
+                focusedIndex = uiState.zapFocusedIndex,
+                playingChannelId = uiState.channel?.id,
+                programs = uiState.zapPrograms,
+                isCompact = isCompact,
+                onPrevFolder = { viewModel.switchZapFolder(-1) },
+                onNextFolder = { viewModel.switchZapFolder(1) },
+                onRowClick = { idx -> viewModel.playZapIndex(idx) },
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(if (isPortrait) 0.85f else if (isCompact) 0.42f else 0.3f),
+            )
         }
 
         // ─── OLED Screensaver Overlay ──────────────────────────────────────────
@@ -1511,4 +1582,219 @@ private fun Context.findPlayerActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findPlayerActivity()
     else -> null
+}
+
+/**
+ * Semi-transparent channel list shown on the left over the playing video (live mode).
+ * Renders only visible rows (LazyColumn with stable keys) — fast even with 2000+ channels.
+ */
+@Composable
+private fun ChannelZapOverlay(
+    folderTitle: String,
+    channels: List<com.minogatv.box.core.model.Channel>,
+    focusedIndex: Int,
+    playingChannelId: Long?,
+    programs: Map<Long, String>,
+    isCompact: Boolean,
+    onPrevFolder: () -> Unit,
+    onNextFolder: () -> Unit,
+    onRowClick: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState(
+        initialFirstVisibleItemIndex = (focusedIndex - 3).coerceAtLeast(0),
+    )
+    var lastFolderTitle by remember { mutableStateOf(folderTitle) }
+    LaunchedEffect(focusedIndex, folderTitle, channels.size) {
+        if (channels.isNotEmpty()) {
+            val target = focusedIndex.coerceIn(0, channels.lastIndex)
+            val folderChanged = lastFolderTitle != folderTitle
+            lastFolderTitle = folderTitle
+            val visible = listState.layoutInfo.visibleItemsInfo
+            val first = visible.firstOrNull()?.index ?: -1
+            val last = visible.lastOrNull()?.index ?: -1
+            if (folderChanged || visible.isEmpty() || target <= first || target >= last) {
+                listState.scrollToItem((target - 3).coerceAtLeast(0))
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .background(Color(0xBF07090E))
+            .border(width = 1.dp, color = ChannelDesignTokens.NeonCyan.copy(alpha = 0.18f))
+            .padding(horizontal = if (isCompact) 6.dp else 10.dp, vertical = if (isCompact) 8.dp else 14.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ChannelDesignTokens.NeonCyan.copy(alpha = 0.14f))
+                    .border(1.dp, ChannelDesignTokens.NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                    .clickable { onPrevFolder() }
+                    .padding(horizontal = if (isCompact) 8.dp else 10.dp, vertical = if (isCompact) 3.dp else 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "◄",
+                    color = ChannelDesignTokens.NeonCyan,
+                    fontSize = if (isCompact) 11.sp else 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = folderTitle.ifBlank { "Каналы" },
+                    color = Color.White,
+                    fontSize = if (isCompact) 12.sp else 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    text = "(${channels.size})",
+                    color = ChannelDesignTokens.NeonCyan,
+                    fontSize = if (isCompact) 11.sp else 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ChannelDesignTokens.NeonCyan.copy(alpha = 0.14f))
+                    .border(1.dp, ChannelDesignTokens.NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                    .clickable { onNextFolder() }
+                    .padding(horizontal = if (isCompact) 8.dp else 10.dp, vertical = if (isCompact) 3.dp else 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "►",
+                    color = ChannelDesignTokens.NeonCyan,
+                    fontSize = if (isCompact) 11.sp else 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+        androidx.compose.foundation.lazy.LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            items(
+                count = channels.size,
+                key = { i -> channels[i].id },
+            ) { i ->
+                val ch = channels[i]
+                val isFocused = i == focusedIndex
+                val isPlaying = ch.id == playingChannelId
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (isFocused) Color(0x3300E5FF) else Color.Transparent)
+                        .border(
+                            width = if (isFocused) 2.dp else 0.dp,
+                            color = if (isFocused) ChannelDesignTokens.NeonCyan else Color.Transparent,
+                            shape = RoundedCornerShape(10.dp),
+                        )
+                        .clickable { onRowClick(i) }
+                        .padding(horizontal = 6.dp, vertical = if (isCompact) 4.dp else 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${i + 1}",
+                        color = if (isFocused) ChannelDesignTokens.NeonCyan else Color(0xFF8B949E),
+                        fontSize = if (isCompact) 11.sp else 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.width(if (isCompact) 28.dp else 36.dp),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(if (isCompact) 30.dp else 38.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF1E2533)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val logo = ch.logoUrl?.trim().orEmpty()
+                        if (logo.isNotEmpty()) {
+                            AsyncImage(
+                                model = logo,
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize().padding(2.dp),
+                            )
+                        } else {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = null,
+                                tint = ChannelDesignTokens.NeonCyan,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = ch.name,
+                                color = if (isFocused) Color.White else Color(0xFFE2E8F0),
+                                fontSize = if (isCompact) 12.sp else 14.sp,
+                                fontWeight = if (isFocused || isPlaying) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            if (isPlaying) {
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = "● В ЭФИРЕ",
+                                    color = Color(0xFFFF5252),
+                                    fontSize = if (isCompact) 8.5.sp else 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
+                            }
+                        }
+                        val prog = programs[ch.id]
+                        if (!prog.isNullOrBlank()) {
+                            Text(
+                                text = prog,
+                                color = if (isFocused) Color(0xFFB0C4DE) else Color(0xFF8B949E),
+                                fontSize = if (isCompact) 10.sp else 11.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Text(
+            text = "▲▼ канал • ◄► папка • CH± по 10 • OK смотреть • Back закрыть",
+            color = Color(0xFF8B949E),
+            fontSize = if (isCompact) 9.sp else 10.5.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 6.dp, top = 6.dp),
+        )
+    }
 }

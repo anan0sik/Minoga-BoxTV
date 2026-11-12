@@ -378,6 +378,99 @@
       color: var(--accent-cyan);
     }
 
+    /* Setup form: stacked numbered blocks, live summary, success panel */
+    .setup-block {
+      background: rgba(13, 17, 26, 0.72);
+      border: 1px solid rgba(0, 229, 255, 0.16);
+      border-left: 4px solid var(--accent-cyan);
+      border-radius: 16px;
+      padding: 16px 18px 6px;
+      margin-bottom: 18px;
+    }
+
+    .setup-block + .setup-block {
+      background: rgba(16, 22, 38, 0.72);
+    }
+
+    .setup-block-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15.5px;
+      font-weight: 800;
+      color: var(--text-primary);
+      padding-bottom: 10px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid rgba(0, 229, 255, 0.22);
+    }
+
+    .setup-block-num {
+      font-size: 20px;
+      color: var(--accent-cyan);
+      line-height: 1;
+    }
+
+    .setup-block-optional {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .setup-summary {
+      margin-top: 4px;
+      padding: 13px 16px;
+      border-radius: 12px;
+      background: rgba(0, 229, 255, 0.07);
+      border: 1px solid rgba(0, 229, 255, 0.3);
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .setup-summary-title {
+      font-weight: 800;
+      color: var(--accent-cyan);
+      margin-bottom: 4px;
+    }
+
+    .setup-summary-line {
+      word-break: break-word;
+    }
+
+    .setup-summary-hint {
+      margin-top: 6px;
+      font-weight: 700;
+      color: #F87171;
+    }
+
+    .setup-success-panel {
+      text-align: center;
+      padding: 22px 18px;
+      border-radius: 16px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.45);
+      margin-bottom: 8px;
+    }
+
+    .setup-success-icon {
+      font-size: 40px;
+      line-height: 1;
+      margin-bottom: 10px;
+    }
+
+    .setup-success-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: #34D399;
+      margin-bottom: 8px;
+    }
+
+    .setup-success-text {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
     .hidden {
       display: none !important;
     }
@@ -798,6 +891,19 @@
         <li><span class="step-badge">2</span><span>Введите адрес <strong>minogatvbox.duckdns.org/apk</strong> — начнётся загрузка APK.</span></li>
         <li><span class="step-badge">3</span><span>Разрешите <strong>установку из неизвестных источников</strong> для Downloader и установите приложение.</span></li>
       </ul>
+
+      <div style="margin-top: 14px; padding: 13px 16px; border-radius: 12px; background: rgba(0, 229, 255, 0.07); border: 1px solid rgba(0, 229, 255, 0.3); font-size: 13px; color: var(--text-secondary); line-height: 1.55;">
+        <div style="font-size: 13.5px; font-weight: 800; color: var(--accent-cyan); margin-bottom: 6px;">
+          🆕 Что нового в актуальном обновлении (v1.1.9):
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 6px 16px;">
+          <div>🔤 <strong>Сортировка каналов А–Я / Я–А:</strong> кнопка «⇅» в списке каналов, режим запоминается, а переключение каналов в плеере идёт в том же порядке.</div>
+          <div>📺 <strong>Список каналов поверх видео:</strong> в полноэкранном просмотре кнопки ▲/▼ открывают прозрачный список с текущими передачами — выберите канал, не прерывая просмотр.</div>
+          <div>📅 <strong>Программа передач на 3 дня вперёд:</strong> с датами и разделителями дней, а передачи, доступные в архиве, подсвечены оранжевым.</div>
+          <div>🚀 <strong>Удобная отправка с сайта:</strong> плейлист и Медиатека заполняются и отправляются на ТВ одной формой, с наглядной сводкой перед отправкой.</div>
+          <div>🛡️ <strong>Защищённый DNS (Smart DoH):</strong> встроенная поддержка DNS-over-HTTPS (Cloudflare <code>1.1.1.1</code> / Google <code>8.8.8.8</code>) для стабильного подключения к серверам плейлистов, Медиатеки и видеопотоков, если DNS роутера или оператора работает со сбоями.</div>
+        </div>
+      </div>
     </section>
 
     <!-- Запуск на телевизорах LG, Samsung, других Smart TV и Windows через Media Station X -->
@@ -954,6 +1060,9 @@
           <div style="font-size: 12.5px; color: var(--text-secondary); margin-top: 3px;">
             Кнопка <strong>Back (Назад)</strong> возвращает из полноэкранного канала в список, а из списка — к папкам. При просмотре архива кнопки <strong>◄ Влево / Вправо ►</strong> перематывают передачу.
           </div>
+          <div style="font-size: 12.5px; color: var(--text-secondary); margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(0, 229, 255, 0.18);">
+            🌐 <strong>Сетевая отказоустойчивость:</strong> если ваш домашний роутер или DNS-сервер оператора не находит адрес сервера плейлиста, приложение автоматически использует резервное разрешение имён <strong>Smart DoH (HTTPS DNS)</strong> и защищённый транспорт для стабильного воспроизведения.
+          </div>
         </div>
       </div>
     </section>
@@ -999,30 +1108,36 @@
         <button type="button" class="btn btn-secondary btn-small" onclick="resetToCodeStep()">Сменить код</button>
       </div>
 
-      <div style="display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap;">
-        <button type="button" id="setup-sec-tab-tv" class="msx-tab active" style="flex: 1; justify-content: center; font-size: 14px; padding: 11px 16px;" onclick="setSetupSectionTab('TV')">
-          📺 Телеканалы и EPG
-        </button>
-        <button type="button" id="setup-sec-tab-vod" class="msx-tab" style="flex: 1; justify-content: center; font-size: 14px; padding: 11px 16px;" onclick="setSetupSectionTab('VOD')">
-          🎬 Медиатека (Портал фильмов)
+      <div id="setup-success-panel" class="setup-success-panel hidden" role="status" aria-live="polite">
+        <div class="setup-success-icon">✅</div>
+        <div class="setup-success-title">Настройки отправлены на устройство с кодом <span id="setup-success-code" class="connected-code-badge">0000</span></div>
+        <div class="setup-success-text" id="setup-success-details">Приложение на ТВ уже принимает настройки.</div>
+        <div class="setup-success-text">Поля формы очищены — данные не сохраняются в этом браузере.</div>
+        <button type="button" class="btn btn-primary" style="max-width: 360px; margin: 14px auto 0;" onclick="connectAnotherDevice()">
+          ➕ Подключить другое устройство
         </button>
       </div>
 
-      <form id="setup-form" onsubmit="handleSubmitConfig(event)">
-        <!-- Вкладка 1: Телеканалы и EPG -->
-        <div id="setup-section-tv">
+      <form id="setup-form" onsubmit="handleSubmitConfig(event)" autocomplete="off">
+        <!-- Раздел 1: Телеканалы и EPG -->
+        <div id="setup-section-tv" class="setup-block">
+          <div class="setup-block-title">
+            <span class="setup-block-num">①</span>
+            <span>📺 Телеканалы и EPG</span>
+          </div>
           <div class="form-group">
             <label class="form-label" for="input-name">Название плейлиста *</label>
             <input id="input-name"
                    type="text"
                    class="input-field"
                    placeholder="Например: Minoga TV"
+                   autocomplete="off"
                    value="Minoga TV" />
           </div>
 
           <div class="form-group">
             <label class="form-label">
-              <span>Источник плейлиста (M3U / M3U8) *</span>
+              <span>Источник плейлиста (M3U / M3U8) — обязателен, если не заполнена Медиатека</span>
             </label>
             <div style="display: flex; gap: 8px; margin-bottom: 10px;">
               <button type="button" id="pl-tab-url" class="msx-tab active" style="flex: 1; justify-content: center;" onclick="setPlaylistInputMode('URL')">
@@ -1038,6 +1153,7 @@
                 <input id="input-playlist"
                        type="url"
                        class="input-field"
+                       autocomplete="off"
                        placeholder="http://example.com/playlist.m3u8" />
                 <button type="button" class="btn btn-secondary btn-small" onclick="pasteInto('input-playlist')">📋 Вставить</button>
               </div>
@@ -1065,18 +1181,21 @@
 
           <div class="form-group">
             <label class="form-label" for="input-epg">
-              <span>Ссылка на телепрограмму EPG (.xml / .xml.gz)</span>
+              <span>Источник телепрограммы EPG (оставьте пустым для ⚡ Live EPG с сервера)</span>
             </label>
             <div class="input-row">
               <input id="input-epg"
                      type="url"
                      class="input-field"
-                     placeholder="http://epg.one/epg2.xml.gz"
-                     value="http://epg.one/epg2.xml.gz" />
+                     autocomplete="off"
+                     placeholder="⚡ Пусто = готовый Live EPG с сервера (или укажите ссылку .xml.gz)"
+                     value="" />
               <button type="button" class="btn btn-secondary btn-small" onclick="pasteInto('input-epg')">📋 Вставить</button>
             </div>
+            <div class="form-hint">Если оставить поле пустым, приставка и Media Station X мгновенно подгрузят уже готовую программу передач и иконки каналов напрямую с нашего сервера (<strong>⚡ Live EPG</strong>).</div>
             <div class="presets-label">Быстрый выбор источника EPG:</div>
             <div class="chips">
+              <button type="button" class="chip" style="border-color: var(--accent-cyan); color: var(--accent-cyan); background: rgba(0, 229, 255, 0.1);" onclick="setEpg('')">⚡ Live EPG с сервера (Рекомендуется)</button>
               <button type="button" class="chip" onclick="setEpg('http://epg.one/epg2.xml.gz')">EPG.ONE (Основной)</button>
               <button type="button" class="chip" onclick="setEpg('http://cdn.epg.one/epg2.xml.gz')">EPG.ONE CDN</button>
               <button type="button" class="chip" onclick="setEpg('https://epg.it999.ru/edem.xml.gz')">IT999 Edem</button>
@@ -1086,20 +1205,25 @@
           </div>
         </div>
 
-        <!-- Вкладка 2: Медиатека (Портал с фильмами и сериалами) -->
-        <div id="setup-section-vod" class="hidden">
+        <!-- Раздел 2: Медиатека (Портал с фильмами и сериалами), необязательно -->
+        <div id="setup-section-vod" class="setup-block">
+          <div class="setup-block-title">
+            <span class="setup-block-num">②</span>
+            <span>🎬 Медиатека — фильмы и сериалы <span class="setup-block-optional">(необязательно)</span></span>
+          </div>
           <div style="background: rgba(0, 229, 255, 0.08); border: 1px solid rgba(0, 229, 255, 0.35); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; font-size: 13px; color: var(--text-secondary);">
-            🎬 <strong>Подключение портала Медиатеки (VOD):</strong> укажите параметры доступа к каталогу фильмов и сериалов от вашего провайдера (Stalker Portal, VPortal по ключу или Xtream Codes). Заполните те поля, которые выдал ваш провайдер.
+            🎬 <strong>Подключение портала Медиатеки (VOD):</strong> если провайдер выдал доступ к каталогу фильмов и сериалов (Stalker Portal, VPortal по ключу или Xtream Codes), заполните поля ниже — они отправятся на ТВ вместе с плейлистом. Если Медиатеки нет, просто оставьте этот блок пустым.
           </div>
 
           <div class="form-group">
             <label class="form-label" for="input-vod-url">
-              <span>URL портала Медиатеки *</span>
+              <span>URL портала Медиатеки</span>
             </label>
             <div class="input-row">
               <input id="input-vod-url"
                      type="text"
                      class="input-field"
+                     autocomplete="off"
                      placeholder="Например: https://... или portal::[key:...]http://..."
                      oninput="autoParsePortalInput('input-vod-url')" />
               <button type="button" class="btn btn-secondary btn-small" onclick="pasteInto('input-vod-url')">📋 Вставить</button>
@@ -1144,8 +1268,16 @@
           </div>
         </div>
 
+        <div id="setup-summary" class="setup-summary" aria-live="polite">
+          <div class="setup-summary-title">Будет отправлено на ТВ (код <span id="setup-summary-code">0000</span>):</div>
+          <div id="setup-summary-playlist" class="setup-summary-line">➖ Плейлист: не указан</div>
+          <div id="setup-summary-epg" class="setup-summary-line">✅ EPG: ⚡ Live EPG с сервера</div>
+          <div id="setup-summary-vod" class="setup-summary-line">➖ Медиатека: не указана</div>
+          <div id="setup-summary-hint" class="setup-summary-hint hidden">Укажите плейлист (ссылку или файл) и/или Медиатеку — иначе отправлять нечего.</div>
+        </div>
+
         <button type="submit" id="submit-btn" class="btn btn-primary" style="margin-top: 10px;">
-          🚀 Установить настройки на ТВ
+          🚀 Отправить на ТВ: плейлист
         </button>
 
         <div id="setup-toast" class="toast"></div>
@@ -1160,15 +1292,15 @@
       <ul class="steps-list">
         <li>
           <span class="step-badge">1</span>
-          <span>На телевизоре в приложении <strong>Minoga TV Box</strong> нажмите кнопку <strong>«🌐 Загрузить с Веб-страницы»</strong> — на экране появится 4-значный код.</span>
+          <span>На телевизоре в приложении <strong>Minoga TV Box</strong> (или в <strong>Media Station X</strong>) нажмите кнопку <strong>«🌐 Загрузить с Веб-страницы»</strong> — на экране появится 4-значный код.</span>
         </li>
         <li>
           <span class="step-badge">2</span>
-          <span>Введите этот 4-значный код выше — откроется форма настройки.</span>
+          <span>Введите этот 4-значный код выше — откроются вкладки <strong>«📺 Телеканалы и EPG»</strong> и <strong>«🎬 Медиатека (Портал фильмов)»</strong>.</span>
         </li>
         <li>
           <span class="step-badge">3</span>
-          <span>Заполните <strong>Название</strong>, <strong>Плейлист</strong> и <strong>EPG</strong> и нажмите <strong>«Установить»</strong> — приставка автоматически примет данные и загрузит каналы!</span>
+          <span>Укажите ссылку или файл плейлиста (а также при желании адрес или ключ портала <strong>Медиатеки</strong>) и нажмите <strong>«Установить»</strong> — телевизор автоматически примет все настройки!</span>
         </li>
       </ul>
     </section>
@@ -1179,66 +1311,106 @@
         <span class="section-tag">✨ Возможности программы Minoga TV Box</span>
       </div>
       <p class="step-desc" style="margin-bottom: 6px;">
-        Современный IPTV-медиаплеер в стиле <strong>Obsidian Glassmorphism</strong>, созданный для телевизоров <strong>Android TV / Google TV</strong>, ТВ-приставок, смартфонов и планшетов.
+        Современный IPTV-медиаплеер и онлайн-кинозал в стиле <strong>Obsidian Glassmorphism</strong> для телевизоров <strong>Android TV / Google TV</strong>, ТВ-приставок (Xiaomi Stick / Mi Box и др.), <strong>Smart TV (LG, Samsung, VIDAA через Media Station X)</strong>, компьютеров <strong>Windows</strong> и смартфонов.
       </p>
       <div class="features-grid">
         <div class="feature-item">
           <div class="feature-title">
-            <span class="feature-icon">🌐</span>
-            <span>Привязка плейлиста по 4-значному коду</span>
+            <span class="feature-icon">🎬</span>
+            <span>Встроенная Медиатека (Кинозал VOD)</span>
           </div>
           <div class="feature-text">
-            Никакого ручного ввода длинных ссылок с пульта ТВ — введите 4 цифры кода на этом сайте со смартфона или ПК, и плейлист с телепрограммой мгновенно загрузятся в приставку.
+            Подключение видеотек провайдера (<strong>VPortal по ключу</strong>, <strong>Stalker Portal</strong>, <strong>Xtream Codes</strong>): каталог с постерами, фильмы, сериалы с выбором сезонов и серий, мультфильмы и 4K, сортировка по рейтингу (КП / IMDb) и году, «Избранное», «История» и продолжение просмотра с точной секунды.
+          </div>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-title">
+            <span class="feature-icon">⚡</span>
+            <span>Мгновенный «Live EPG» и иконки с сервера</span>
+          </div>
+          <div class="feature-text">
+            Готовая проиндексированная программа передач и крупные логотипы каналов (во всю высоту плашки) подгружаются напрямую с сервера за секунду — даже если оставить поле EPG пустым, без долгого скачивания тяжёлых <code>.xml.gz</code> файлов на приставке.
+          </div>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-title">
+            <span class="feature-icon">🌐</span>
+            <span>Привязка по 4-значному коду с сайта</span>
+          </div>
+          <div class="feature-text">
+            Никакого ручного ввода длинных ссылок с пульта ТВ — введите 4 цифры кода со смартфона или ПК, чтобы мгновенно отправить на телевизор ссылку или файл плейлиста (<code>.m3u / .m3u8</code>), источник EPG и доступ к порталу Медиатеки.
+          </div>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-title">
+            <span class="feature-icon">🚀</span>
+            <span>Автозапуск с ТВ и при выходе из сна</span>
+          </div>
+          <div class="feature-text">
+            Автоматический старт приложения при включении приставки/телевизора и при пробуждении из спящего режима (<strong>Standby</strong>), автозапуск последнего канала и стабильная работа видеодекодера после сворачивания на ТВ-стиках (Xiaomi Mi TV Stick и др.).
           </div>
         </div>
 
         <div class="feature-item">
           <div class="feature-title">
             <span class="feature-icon">📺</span>
-            <span>Живое видео-превью (Live Preview 16:9)</span>
+            <span>Увеличенное Живое превью (25% экрана)</span>
           </div>
           <div class="feature-text">
-            Предпросмотр выбранного канала в мини-окне прямо во время навигации по списку каналов и программе передач без прерывания обзора.
+            Предпросмотр выбранного канала в крупном окне (четверть высоты экрана) прямо во время навигации по списку каналов и телепрограмме с живым обновлением текущей передачи и прогресс-бара эфира.
           </div>
         </div>
 
         <div class="feature-item">
           <div class="feature-title">
             <span class="feature-icon">⏪</span>
-            <span>Телепрограмма (EPG) и Архив (Catch-up)</span>
+            <span>Архив (Catch-up) и нижнее меню плеера</span>
           </div>
           <div class="feature-text">
-            Автоматическая синхронизация XMLTV / <code>.xml.gz</code> и поддержка всех популярных протоколов архива: <strong>Shift</strong>, <strong>Flussonic</strong>, <strong>Xtream Codes</strong> и <strong>Append</strong> с удобной перемоткой.
+            Поддержка всех протоколов архива (<strong>Shift</strong>, <strong>Flussonic</strong>, <strong>Xtream</strong>, <strong>Append</strong>) и удобная нижняя панель управления с пульта в плеере ТВ и Медиатеки: переключение каналов/серий, перемотка, пауза, избранное и пропорции экрана (Авто / Увеличение / Растянуть).
           </div>
         </div>
 
         <div class="feature-item">
           <div class="feature-title">
             <span class="feature-icon">📁</span>
-            <span>Умные тематические папки и Поиск</span>
+            <span>Тематические папки и ТВ-клавиатура</span>
           </div>
           <div class="feature-text">
-            Автоматическая разбивка каналов по категориям («Все каналы», «Избранное», «Кино», «Спорт», «Детские», «Музыка», «Новости» и папки вашего провайдера) + мгновенный поиск по каналам и эфиру.
+            Наглядные иконки категорий («Кино», «Спорт», «Детские», «Музыка», «Новости», «Познавательные», «HD/4K», «18+» и папки провайдера) + собственная удобная экранная ТВ-клавиатура (<code>АБВГД</code> / <code>ABCDEF</code>) для быстрого поиска пультом.
           </div>
         </div>
 
         <div class="feature-item">
           <div class="feature-title">
             <span class="feature-icon">📱</span>
-            <span>Для Android TV и Смартфонов</span>
+            <span>Android TV, Smart TV (MSX) и Смартфоны</span>
           </div>
           <div class="feature-text">
-            Полноценное управление пультом D-Pad на ТВ и гибридное сенсорное управление (касания + жесты виртуального пульта) с поддержкой вертикального и горизонтального режимов на смартфонах.
+            Высококонтрастный золотой фокус курсора для пульта D-Pad на ТВ, полная адаптация всех окон и настроек к вертикальному (портретному) виду на смартфонах, а также запуск на LG, Samsung, VIDAA и Windows через <strong>Media Station X</strong>.
           </div>
         </div>
 
         <div class="feature-item">
           <div class="feature-title">
-            <span class="feature-icon">🔒</span>
-            <span>Безопасность, PiP, Бэкап и Автообновление</span>
+            <span class="feature-icon">🛡️</span>
+            <span>Интеллектуальный DNS-over-HTTPS (Smart DoH)</span>
           </div>
           <div class="feature-text">
-            Родительский контроль (18+) по PIN-коду, скрытие приватных ссылок плейлистов на экране, режим «Картинка в картинке» (PiP), резервное копирование в JSON и обновление в один клик из Настроек.
+            Встроенный сетевой модуль по стандарту <strong>RFC 8484</strong> с автоматическим резервированием через <strong>Cloudflare (<code>1.1.1.1</code>)</strong> и <strong>Google Public DNS (<code>8.8.8.8</code>)</strong>. Предотвращает ошибки подключения из-за некорректного кэширования или сбоев DNS у домашнего провайдера, кэширует IP-маршруты и ускоряет старт каналов без снижения скорости видеопотока.
+          </div>
+        </div>
+
+        <div class="feature-item">
+          <div class="feature-title">
+            <span class="feature-icon">💬</span>
+            <span>Связь с разработчиком, Защита и OTA</span>
+          </div>
+          <div class="feature-text">
+            Отправка вопросов и оценок разработчику прямо из Настроек ТВ с уведомлениями об ответах на экране, родительский контроль (18+) по PIN-коду, скрытие приватных ссылок, бэкап в JSON и обновление приложения в один клик.
           </div>
         </div>
       </div>
@@ -1633,34 +1805,110 @@
       pill.classList.add('connected');
       document.getElementById('connection-label').textContent = 'Код ' + code + ' подключён';
 
-      // Restore previously typed values from localStorage if available
-      try {
-        const saved = JSON.parse(localStorage.getItem('minoga_last_setup') || '{}');
-        if (saved.name) document.getElementById('input-name').value = saved.name;
-        if (saved.playlistUrl) document.getElementById('input-playlist').value = saved.playlistUrl;
-        if (saved.epgUrl && saved.epgUrl !== 'http://epg.one/epg2.xml.gz') document.getElementById('input-epg').value = saved.epgUrl;
-        if (saved.vodUrl) document.getElementById('input-vod-url').value = saved.vodUrl;
-        if (saved.vodLogin) document.getElementById('input-vod-login').value = saved.vodLogin;
-        if (saved.vodKey) document.getElementById('input-vod-key').value = saved.vodKey;
-      } catch (e) {}
+      // Never restore previously typed values: a shared browser must not leak the last client's links.
+      document.getElementById('setup-success-panel').classList.add('hidden');
+      document.getElementById('setup-form').classList.remove('hidden');
+      updateSetupSummary();
 
       document.getElementById('input-playlist').focus();
     }
 
-    let activeSetupSection = 'TV'; // 'TV' | 'VOD'
-
-    function setSetupSectionTab(tab) {
-      activeSetupSection = tab;
-      document.getElementById('setup-sec-tab-tv').classList.toggle('active', tab === 'TV');
-      document.getElementById('setup-sec-tab-vod').classList.toggle('active', tab === 'VOD');
-      document.getElementById('setup-section-tv').classList.toggle('hidden', tab !== 'TV');
-      document.getElementById('setup-section-vod').classList.toggle('hidden', tab !== 'VOD');
-      const btn = document.getElementById('submit-btn');
-      if (btn && !btn.disabled) {
-        btn.textContent = tab === 'VOD'
-          ? '🚀 Отправить настройки Медиатеки на ТВ'
-          : '🚀 Установить настройки на ТВ';
+    function getHostForSummary(raw) {
+      const s = String(raw || '').trim();
+      if (!s) return '';
+      try {
+        const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : ('http://' + s));
+        return u.host || s;
+      } catch (e) {
+        return s.length > 40 ? s.slice(0, 40) + '…' : s;
       }
+    }
+
+    function getSetupContentState() {
+      const playlistUrl = (document.getElementById('input-playlist').value || '').trim();
+      const hasPlaylist = playlistInputMode === 'FILE' ? !!pickedPlaylistFileContent : !!playlistUrl;
+      const vodUrl = (document.getElementById('input-vod-url').value || '').trim();
+      const vodKey = (document.getElementById('input-vod-key').value || '').trim();
+      const hasVod = !!(vodUrl || vodKey);
+      return { hasPlaylist, hasVod, playlistUrl, vodUrl, vodKey };
+    }
+
+    function submitButtonLabel() {
+      const st = getSetupContentState();
+      if (st.hasPlaylist && st.hasVod) return '🚀 Отправить на ТВ: плейлист + Медиатека';
+      if (!st.hasPlaylist && st.hasVod) return '🚀 Отправить на ТВ: Медиатека';
+      return '🚀 Отправить на ТВ: плейлист';
+    }
+
+    function updateSetupSummary() {
+      const codeEl = document.getElementById('setup-summary-code');
+      if (!codeEl) return;
+      codeEl.textContent = currentVerifiedCode || '----';
+      const st = getSetupContentState();
+      const name = (document.getElementById('input-name').value || '').trim() || 'Minoga TV';
+      const epgUrl = (document.getElementById('input-epg').value || '').trim();
+
+      let plText;
+      if (st.hasPlaylist) {
+        plText = playlistInputMode === 'FILE'
+          ? '✅ Плейлист: ' + name + ' (файл ' + pickedPlaylistFileName + ')'
+          : '✅ Плейлист: ' + name + ' (' + getHostForSummary(st.playlistUrl) + ')';
+      } else if (playlistInputMode === 'FILE') {
+        plText = '➖ Плейлист: файл не выбран';
+      } else {
+        plText = '➖ Плейлист: не указан';
+      }
+      document.getElementById('setup-summary-playlist').textContent = plText;
+      document.getElementById('setup-summary-epg').textContent = epgUrl
+        ? '✅ EPG: ' + getHostForSummary(epgUrl)
+        : '✅ EPG: ⚡ Live EPG с сервера';
+      let vodText = '➖ Медиатека: не указана';
+      if (st.hasVod) {
+        vodText = '✅ Медиатека: ' + (st.vodUrl ? getHostForSummary(cleanVodPortalUrlJs(st.vodUrl)) : 'по ключу доступа');
+      }
+      document.getElementById('setup-summary-vod').textContent = vodText;
+
+      const empty = !st.hasPlaylist && !st.hasVod;
+      document.getElementById('setup-summary-hint').classList.toggle('hidden', !empty);
+      const btn = document.getElementById('submit-btn');
+      if (btn && !btn.dataset.busy) {
+        btn.textContent = submitButtonLabel();
+        btn.disabled = empty;
+        btn.title = empty ? 'Укажите плейлист и/или Медиатеку' : '';
+      }
+    }
+
+    function clearSetupForm() {
+      document.getElementById('input-name').value = 'Minoga TV';
+      document.getElementById('input-playlist').value = '';
+      document.getElementById('input-epg').value = '';
+      document.getElementById('input-vod-url').value = '';
+      document.getElementById('input-vod-login').value = '';
+      document.getElementById('input-vod-password').value = '';
+      document.getElementById('input-vod-key').value = '';
+      const fileInput = document.getElementById('input-playlist-file');
+      if (fileInput) fileInput.value = '';
+      pickedPlaylistFileContent = '';
+      pickedPlaylistFileName = '';
+      const statusEl = document.getElementById('picked-file-status');
+      if (statusEl) statusEl.textContent = 'Файл не выбран (подойдёт любой файл .m3u или .m3u8 с телефона или ПК)';
+      setPlaylistInputMode('URL');
+      updateSetupSummary();
+    }
+
+    function connectAnotherDevice() {
+      clearSetupForm();
+      document.getElementById('setup-success-panel').classList.add('hidden');
+      document.getElementById('setup-form').classList.remove('hidden');
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('code') && window.history && window.history.replaceState) {
+        params.delete('code');
+        const q = params.toString();
+        window.history.replaceState(null, '', window.location.pathname + (q ? '?' + q : '') + window.location.hash);
+      }
+      resetToCodeStep();
+      const card = document.getElementById('step-code-card');
+      if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function resetToCodeStep() {
@@ -1669,6 +1917,8 @@
       hideToast('code-toast');
       document.getElementById('step-setup-card').classList.add('hidden');
       document.getElementById('step-code-card').classList.remove('hidden');
+      document.getElementById('setup-success-panel').classList.add('hidden');
+      document.getElementById('setup-form').classList.remove('hidden');
 
       const pill = document.getElementById('connection-pill');
       pill.classList.remove('connected');
@@ -1688,6 +1938,7 @@
       document.getElementById('pl-tab-file').classList.toggle('active', mode === 'FILE');
       document.getElementById('playlist-url-box').classList.toggle('hidden', mode !== 'URL');
       document.getElementById('playlist-file-box').classList.toggle('hidden', mode !== 'FILE');
+      updateSetupSummary();
     }
 
     function handlePlaylistFilePicked(event) {
@@ -1708,10 +1959,12 @@
         if (nameInput && (!nameInput.value.trim() || nameInput.value.trim() === 'Minoga TV')) {
           nameInput.value = file.name.replace(/\.(m3u8|m3u|txt)$/i, '');
         }
+        updateSetupSummary();
       };
       reader.onerror = function() {
         pickedPlaylistFileContent = '';
         statusEl.textContent = '❌ Ошибка чтения файла';
+        updateSetupSummary();
       };
       reader.readAsText(file, 'UTF-8');
     }
@@ -1771,18 +2024,29 @@
       autoParsePortalInput('input-vod-key');
 
       const name = document.getElementById('input-name').value.trim() || 'Minoga TV';
-      let playlistUrl = document.getElementById('input-playlist').value.trim();
+      // Only the visible playlist source is sent (URL in URL mode, picked file in FILE mode).
+      let playlistUrl = playlistInputMode === 'URL' ? document.getElementById('input-playlist').value.trim() : '';
       const epgUrl = document.getElementById('input-epg').value.trim();
       const vodUrl = cleanVodPortalUrlJs((document.getElementById('input-vod-url').value || '').trim());
       const vodLogin = (document.getElementById('input-vod-login').value || '').trim();
       const vodPassword = (document.getElementById('input-vod-password').value || '').trim();
       const vodKey = (document.getElementById('input-vod-key').value || '').trim();
+      const sentCode = currentVerifiedCode;
+
+      const hasFile = playlistInputMode === 'FILE' && !!pickedPlaylistFileContent;
+      if (!playlistUrl && !hasFile && !vodUrl && !vodKey) {
+        showToast('setup-toast', 'Нечего отправлять: укажите ссылку на плейлист или выберите файл (блок ①) и/или заполните Медиатеку (блок ②).', 'error');
+        updateSetupSummary();
+        return;
+      }
 
       const btn = document.getElementById('submit-btn');
       btn.disabled = true;
+      btn.dataset.busy = '1';
+      let succeeded = false;
 
       try {
-        if (playlistInputMode === 'FILE' && pickedPlaylistFileContent) {
+        if (hasFile) {
           btn.textContent = 'Загрузка файла плейлиста на сервер...';
           const upRes = await fetch('/api/playlist/upload', {
             method: 'POST',
@@ -1792,40 +2056,23 @@
           const upData = await upRes.json().catch(() => ({}));
           if (!upRes.ok || !upData.playlistUrl) {
             showToast('setup-toast', upData.error || 'Не удалось загрузить файл плейлиста', 'error');
-            btn.disabled = false;
-            btn.textContent = activeSetupSection === 'VOD' ? '🚀 Отправить настройки Медиатеки на ТВ' : '🚀 Установить настройки на ТВ';
             return;
           }
           playlistUrl = upData.playlistUrl;
         }
-
-        if (!playlistUrl && !vodUrl && !vodKey) {
-          if (activeSetupSection === 'VOD') {
-            showToast('setup-toast', 'Укажите URL портала или Ключ доступа к Медиатеке', 'error');
-          } else {
-            showToast('setup-toast', 'Укажите ссылку на плейлист, загрузите файл или заполните вкладку «Медиатека»', 'error');
-          }
-          btn.disabled = false;
-          btn.textContent = activeSetupSection === 'VOD' ? '🚀 Отправить настройки Медиатеки на ТВ' : '🚀 Установить настройки на ТВ';
-          return;
-        }
-
-        try {
-          localStorage.setItem('minoga_last_setup', JSON.stringify({ name, playlistUrl, epgUrl, vodUrl, vodLogin, vodKey }));
-        } catch (e) {}
 
         btn.textContent = 'Отправка в приложение...';
 
         const hpEl = document.getElementById('pairing-hp-url');
         const hpVal = hpEl ? hpEl.value : '';
         const salt = String(Date.now());
-        const bt = computeAntiBotToken(currentVerifiedCode, salt);
+        const bt = computeAntiBotToken(sentCode, salt);
 
         const res = await fetch('/api/code/submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            code: currentVerifiedCode,
+            code: sentCode,
             name: name,
             playlistUrl: playlistUrl,
             epgUrl: epgUrl,
@@ -1841,23 +2088,43 @@
         const data = await res.json().catch(() => ({}));
 
         if (res.ok) {
-          const msg = (vodUrl || vodKey) && !playlistUrl
-            ? '✅ Настройки Медиатеки успешно отправлены на телевизор!'
-            : '✅ Успешно отправлено! Приложение на ТВ уже принимает настройки.';
-          showToast('setup-toast', msg, 'success');
+          succeeded = true;
+          const parts = [];
+          if (playlistUrl) parts.push('плейлист «' + name + '»');
+          if (vodUrl || vodKey) parts.push('Медиатека');
+          showSetupSuccess(sentCode, parts);
         } else {
           showToast('setup-toast', data.error || 'Ошибка отправки данных по коду', 'error');
         }
       } catch (e) {
         showToast('setup-toast', 'Ошибка соединения с сервером', 'error');
       } finally {
+        delete btn.dataset.busy;
         btn.disabled = false;
-        btn.textContent = activeSetupSection === 'VOD' ? '🚀 Отправить настройки Медиатеки на ТВ' : '🚀 Установить настройки на ТВ';
+        if (!succeeded) updateSetupSummary(); // on failure the fields are kept as typed
       }
+    }
+
+    function showSetupSuccess(code, parts) {
+      // Close the code session so a second click cannot resend, and wipe all typed data.
+      currentVerifiedCode = '';
+      clearSetupForm();
+      hideToast('setup-toast');
+      document.getElementById('setup-success-code').textContent = code;
+      document.getElementById('setup-success-details').textContent =
+        (parts && parts.length ? 'Отправлено: ' + parts.join(' + ') + '. ' : '') + 'Приложение на ТВ уже принимает настройки.';
+      document.getElementById('setup-form').classList.add('hidden');
+      document.getElementById('setup-success-panel').classList.remove('hidden');
+      document.getElementById('active-code-display').textContent = code;
+      const pill = document.getElementById('connection-pill');
+      if (pill) pill.classList.remove('connected');
+      const label = document.getElementById('connection-label');
+      if (label) label.textContent = 'Код ' + code + ': отправлено';
     }
 
     function setEpg(url) {
       document.getElementById('input-epg').value = url;
+      updateSetupSummary();
     }
 
     async function pasteInto(inputId) {
@@ -1868,6 +2135,7 @@
           if (inputId === 'input-vod-url' || inputId === 'input-vod-key') {
             autoParsePortalInput(inputId);
           }
+          updateSetupSummary();
         }
       } catch (e) {
         alert('Вставьте ссылку вручную (долгое нажатие или Ctrl+V)');
@@ -2081,6 +2349,15 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
+      // Old versions stored the last client's playlist/Mediateka links here — wipe them for everyone.
+      try { localStorage.removeItem('minoga_last_setup'); } catch (e) {}
+      const setupForm = document.getElementById('setup-form');
+      if (setupForm) {
+        // Bubbling listeners run after the inputs' own oninput handlers (portal auto-parse).
+        setupForm.addEventListener('input', updateSetupSummary);
+        setupForm.addEventListener('change', updateSetupSummary);
+      }
+      updateSetupSummary();
       loadPublicFeedback();
       // Allow ?code=1234 in URL query string for quick opening
       const params = new URLSearchParams(window.location.search);

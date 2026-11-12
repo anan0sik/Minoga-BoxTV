@@ -41,6 +41,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,6 +68,9 @@ private val LiveBadgeColor      = ChannelDesignTokens.LiveRed
 private val CatchupBadgeColor   = ChannelDesignTokens.CatchupGreen
 private val SelectedItemBg      = Color(0xFF1D3B68)
 private val DividerColor        = Color(0x1F00E5FF)
+private val ArchiveAmber        = Color(0xFFF59E0B)
+private val ArchiveAmberLight   = Color(0xFFFBBF24)
+private val ArchiveRowBg        = Color(0x14F59E0B)
 
 private val timeFmt = SimpleDateFormat("HH:mm", Locale.getDefault())
 
@@ -100,10 +104,17 @@ fun EpgSidePanel(
 ) {
     val listState = rememberLazyListState()
 
-    // Auto-scroll to keep the focused item visible
-    LaunchedEffect(focusedIndex) {
+    // Display rows = programme entries + non-focusable day dividers (+ optional footer).
+    // sidePanelItems indexes stay unchanged; focus index is mapped to the list row for scrolling.
+    val panelRows = remember(items) { buildPanelRows(items, System.currentTimeMillis()) }
+
+    // Auto-scroll to keep the focused item visible (show its day divider when it starts a new day)
+    LaunchedEffect(focusedIndex, panelRows) {
         if (items.isNotEmpty()) {
-            listState.animateScrollToItem(focusedIndex.coerceIn(0, items.lastIndex))
+            val idx = focusedIndex.coerceIn(0, items.lastIndex)
+            var row = panelRows.focusToRow.getOrElse(idx) { idx }
+            if (row > 0 && panelRows.rows.getOrNull(row - 1) is PanelRow.Divider) row -= 1
+            listState.animateScrollToItem(row)
         }
     }
 
@@ -161,33 +172,15 @@ fun EpgSidePanel(
                                 .fillMaxHeight(),
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
-                            itemsIndexed(items) { index, item ->
-                                val isFocused = isFocusInSidePanel && index == focusedIndex
-                                val handleRowClick = {
-                                    if (!isFocused) {
-                                        onItemFocused(index)
-                                    } else {
-                                        onItemSelected(item)
-                                    }
-                                }
-                                when (item) {
-                                    is SidePanelItem.Programme ->
-                                        ProgrammeRow(
-                                            item = item,
-                                            isFocused = isFocused,
-                                            scaleFactor = scaleFactor,
-                                            onClick = handleRowClick,
-                                        )
-
-                                    is SidePanelItem.CatchupSlot ->
-                                        CatchupSlotRow(
-                                            item = item,
-                                            isFocused = isFocused,
-                                            scaleFactor = scaleFactor,
-                                            onClick = handleRowClick,
-                                        )
-                                }
-                            }
+                            panelRowItems(
+                                panelRows = panelRows,
+                                entries = items,
+                                focusedIndex = focusedIndex,
+                                isFocusInSidePanel = isFocusInSidePanel,
+                                scaleFactor = scaleFactor,
+                                onItemFocused = onItemFocused,
+                                onItemSelected = onItemSelected,
+                            )
                         }
 
                         // Right 65%: Program details card
@@ -210,38 +203,162 @@ fun EpgSidePanel(
                             .padding(horizontal = 6.dp, vertical = 3.dp),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
-                        itemsIndexed(items) { index, item ->
-                            val isFocused = isFocusInSidePanel && index == focusedIndex
-                            val handleRowClick = {
-                                if (!isFocused) {
-                                    onItemFocused(index)
-                                } else {
-                                    onItemSelected(item)
-                                }
-                            }
-                            when (item) {
-                                is SidePanelItem.Programme ->
-                                    ProgrammeRow(
-                                        item = item,
-                                        isFocused = isFocused,
-                                        scaleFactor = scaleFactor,
-                                        onClick = handleRowClick,
-                                    )
-
-                                is SidePanelItem.CatchupSlot ->
-                                    CatchupSlotRow(
-                                        item = item,
-                                        isFocused = isFocused,
-                                        scaleFactor = scaleFactor,
-                                        onClick = handleRowClick,
-                                    )
-                            }
-                        }
+                        panelRowItems(
+                            panelRows = panelRows,
+                            entries = items,
+                            focusedIndex = focusedIndex,
+                            isFocusInSidePanel = isFocusInSidePanel,
+                            scaleFactor = scaleFactor,
+                            onItemFocused = onItemFocused,
+                            onItemSelected = onItemSelected,
+                        )
                     }
                 }
             }
         }
     }
+}
+
+// ─── Display rows (entries + day dividers + footer) ──────────────────────────
+
+private sealed class PanelRow {
+    data class Entry(val index: Int, val key: String, val datePrefix: String) : PanelRow()
+    data class Divider(val label: String, val key: String) : PanelRow()
+    data object Footer : PanelRow()
+}
+
+private class PanelRows(val rows: List<PanelRow>, val focusToRow: IntArray)
+
+private fun SidePanelItem.programOf(): EpgProgram = when (this) {
+    is SidePanelItem.Programme -> program
+    is SidePanelItem.CatchupSlot -> program
+}
+
+private fun buildPanelRows(items: List<SidePanelItem>, nowMs: Long): PanelRows {
+    if (items.isEmpty()) return PanelRows(emptyList(), IntArray(0))
+    val rows = ArrayList<PanelRow>(items.size + 12)
+    val focusToRow = IntArray(items.size)
+    var prevDay = Int.MIN_VALUE
+    items.forEachIndexed { index, item ->
+        val p = item.programOf()
+        val day = EpgDateFormat.dayKey(p.startMs)
+        if (prevDay != Int.MIN_VALUE && day != prevDay) {
+            rows.add(PanelRow.Divider(EpgDateFormat.dayDividerLabel(p.startMs, nowMs), "d_$day"))
+        }
+        prevDay = day
+        focusToRow[index] = rows.size
+        rows.add(PanelRow.Entry(index, "p_${index}_${p.startMs}", EpgDateFormat.dayPrefix(p.startMs, nowMs)))
+    }
+    // Source publishes nothing further: tell the user instead of looking broken
+    val lastEnd = items.maxOf { it.programOf().endMs }
+    if (lastEnd - nowMs < 3L * 3600_000L) {
+        rows.add(PanelRow.Footer)
+    }
+    return PanelRows(rows, focusToRow)
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.panelRowItems(
+    panelRows: PanelRows,
+    entries: List<SidePanelItem>,
+    focusedIndex: Int,
+    isFocusInSidePanel: Boolean,
+    scaleFactor: Float,
+    onItemFocused: (Int) -> Unit,
+    onItemSelected: (SidePanelItem) -> Unit,
+) {
+    items(
+        count = panelRows.rows.size,
+        key = { i ->
+            when (val r = panelRows.rows[i]) {
+                is PanelRow.Entry -> r.key
+                is PanelRow.Divider -> r.key
+                PanelRow.Footer -> "footer"
+            }
+        },
+        contentType = { i ->
+            when (panelRows.rows[i]) {
+                is PanelRow.Entry -> 0
+                is PanelRow.Divider -> 1
+                PanelRow.Footer -> 2
+            }
+        },
+    ) { i ->
+        when (val row = panelRows.rows[i]) {
+            is PanelRow.Divider -> DayDividerRow(label = row.label, scaleFactor = scaleFactor)
+            PanelRow.Footer -> EpgEndFooter(scaleFactor = scaleFactor)
+            is PanelRow.Entry -> {
+                val index = row.index
+                val item = entries.getOrNull(index) ?: return@items
+                val isFocused = isFocusInSidePanel && index == focusedIndex
+                val handleRowClick = {
+                    if (!isFocused) {
+                        onItemFocused(index)
+                    } else {
+                        onItemSelected(item)
+                    }
+                }
+                when (item) {
+                    is SidePanelItem.Programme ->
+                        ProgrammeRow(
+                            item = item,
+                            isFocused = isFocused,
+                            scaleFactor = scaleFactor,
+                            datePrefix = row.datePrefix,
+                            onClick = handleRowClick,
+                        )
+
+                    is SidePanelItem.CatchupSlot ->
+                        CatchupSlotRow(
+                            item = item,
+                            isFocused = isFocused,
+                            scaleFactor = scaleFactor,
+                            datePrefix = row.datePrefix,
+                            onClick = handleRowClick,
+                        )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayDividerRow(label: String, scaleFactor: Float) {
+    val isCompact = scaleFactor <= 0.65f
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = if (isCompact) 3.dp else 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f).height(1.dp).background(AccentColor.copy(alpha = 0.25f)))
+        Text(
+            text = label,
+            color = AccentColor.copy(alpha = 0.85f),
+            fontSize = if (isCompact) 8.5.sp else 9.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.3.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 6.dp),
+        )
+        Box(Modifier.weight(1f).height(1.dp).background(AccentColor.copy(alpha = 0.25f)))
+    }
+}
+
+@Composable
+private fun EpgEndFooter(scaleFactor: Float) {
+    val isCompact = scaleFactor <= 0.65f
+    Text(
+        text = "Программа передач дальше не опубликована источником EPG",
+        color = TextSecondary.copy(alpha = 0.7f),
+        fontSize = if (isCompact) 8.5.sp else 9.5.sp,
+        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+    )
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -346,9 +463,12 @@ private fun ProgrammeRow(
     item: SidePanelItem.Programme,
     isFocused: Boolean,
     scaleFactor: Float = 1.0f,
+    datePrefix: String = "",
     onClick: () -> Unit,
 ) {
-    val bg = if (isFocused) SelectedItemBg else Color(0x55131825)
+    // Past programmes without archive stay grey and muted
+    val isPast = !item.isLive && item.program.endMs <= System.currentTimeMillis()
+    val bg = if (isFocused) SelectedItemBg else if (isPast) Color(0x330F131D) else Color(0x55131825)
     val borderColor = if (isFocused) AccentColor else Color(0x1A00E5FF)
     val isCompact = scaleFactor <= 0.65f
 
@@ -390,8 +510,18 @@ private fun ProgrammeRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
+                    if (datePrefix.isNotEmpty()) {
+                        Text(
+                            text = datePrefix,
+                            color = TextSecondary.copy(alpha = 0.75f),
+                            fontSize = if (isCompact) 8.5.sp else 9.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
                     Text(
-                        text = "${timeFmt.format(Date(item.program.startMs))}–${timeFmt.format(Date(item.program.endMs))}",
+                        text = EpgDateFormat.timeRange(item.program.startMs, item.program.endMs),
                         color = if (item.isLive || isFocused) AccentColor else TextSecondary,
                         fontSize = if (isCompact) 9.5.sp else 10.5.sp,
                         fontWeight = FontWeight.Bold,
@@ -404,7 +534,11 @@ private fun ProgrammeRow(
                     Spacer(Modifier.width(2.dp))
                     Text(
                         text = item.program.title,
-                        color = if (isFocused) Color.White else TextPrimary,
+                        color = when {
+                            isFocused -> Color.White
+                            isPast -> TextSecondary
+                            else -> TextPrimary
+                        },
                         fontSize = if (isCompact) 10.5.sp else 11.5.sp,
                         fontWeight = if (item.isLive || isFocused) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1,
@@ -451,107 +585,129 @@ private fun CatchupSlotRow(
     item: SidePanelItem.CatchupSlot,
     isFocused: Boolean,
     scaleFactor: Float = 1.0f,
+    datePrefix: String = "",
     onClick: () -> Unit,
 ) {
-    val bg = if (isFocused) SelectedItemBg else Color(0x44131825)
-    val borderColor = if (isFocused) AccentColor else Color(0x1A00E5FF)
+    // Archive rows (actually playable catch-up): warm amber tint + 3dp amber left bar.
+    // Focused state keeps the cyan focus border AND the amber bar so it's still clearly "archive".
+    val bg = if (isFocused) SelectedItemBg else ArchiveRowBg
+    val borderColor = if (isFocused) AccentColor else ArchiveAmber.copy(alpha = 0.22f)
     val isCompact = scaleFactor <= 0.65f
+    val shape = RoundedCornerShape((6 * scaleFactor).coerceAtLeast(4f).dp)
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape((6 * scaleFactor).coerceAtLeast(4f).dp))
+            .clip(shape)
             .background(bg)
             .border(
                 width = if (isFocused) 1.5.dp else 0.5.dp,
                 color = borderColor,
-                shape = RoundedCornerShape((6 * scaleFactor).coerceAtLeast(4f).dp),
+                shape = shape,
             )
             .clickable { onClick() }
-            .focusable()
-            .padding(
-                horizontal = if (isCompact) 6.dp else 8.dp,
-                vertical = if (isCompact) 2.dp else 3.dp,
-            ),
+            .focusable(),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(androidx.compose.foundation.layout.IntrinsicSize.Min),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (isFocused) {
-                Box(
-                    modifier = Modifier
-                        .width(3.dp)
-                        .height(if (isCompact) 16.dp else 22.dp)
-                        .clip(RoundedCornerShape(1.5.dp))
-                        .background(AccentColor),
-                )
-                Spacer(Modifier.width(5.dp))
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                // Line 1: Time + Archive badge + Title
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Text(
-                        text = "${timeFmt.format(Date(item.program.startMs))}–${timeFmt.format(Date(item.program.endMs))}",
-                        color = if (isFocused) AccentColor else TextSecondary,
-                        fontSize = if (isCompact) 9.5.sp else 10.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(ChannelDesignTokens.ArchiveBadgeBg)
-                            .padding(horizontal = 3.dp, vertical = 0.5.dp),
+            // Amber archive bar (full row height)
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .background(ArchiveAmber),
+            )
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(
+                        start = if (isCompact) 5.dp else 7.dp,
+                        end = if (isCompact) 6.dp else 8.dp,
+                        top = if (isCompact) 2.dp else 3.dp,
+                        bottom = if (isCompact) 2.dp else 3.dp,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    // Line 1: Date + Time + Archive badge + Title
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
+                        if (datePrefix.isNotEmpty()) {
+                            Text(
+                                text = datePrefix,
+                                color = ArchiveAmber.copy(alpha = 0.65f),
+                                fontSize = if (isCompact) 8.5.sp else 9.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
                         Text(
-                            text = if (isCompact) "АРХ" else "АРХИВ",
-                            color = ChannelDesignTokens.ArchiveBadgeText,
-                            fontSize = if (isCompact) 7.5.sp else 8.sp,
-                            fontWeight = FontWeight.Bold,
+                            text = EpgDateFormat.timeRange(item.program.startMs, item.program.endMs),
+                            color = if (isFocused) ArchiveAmberLight else ArchiveAmber,
+                            fontSize = if (isCompact) 9.5.sp else 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             softWrap = false,
                         )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(ArchiveAmber.copy(alpha = 0.2f))
+                                .border(0.6.dp, ArchiveAmber.copy(alpha = 0.6f), RoundedCornerShape(3.dp))
+                                .padding(horizontal = 3.dp, vertical = 0.5.dp),
+                        ) {
+                            Text(
+                                text = if (isCompact) "▶ АРХ" else "▶ АРХИВ",
+                                color = ArchiveAmberLight,
+                                fontSize = if (isCompact) 7.5.sp else 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                        Spacer(Modifier.width(2.dp))
+                        Text(
+                            text = item.program.title,
+                            color = if (isFocused) Color.White else TextPrimary,
+                            fontSize = if (isCompact) 10.5.sp else 11.5.sp,
+                            fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
-                    Spacer(Modifier.width(2.dp))
-                    Text(
-                        text = item.program.title,
-                        color = if (isFocused) Color.White else TextPrimary,
-                        fontSize = if (isCompact) 10.5.sp else 11.5.sp,
-                        fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
 
-                // Line 2: Abbreviated description (shown always on TV scale, or on focused row in compact phone mode)
-                val sub = getProgramSubtitle(item.program)
-                if (sub.isNotEmpty() && (!isCompact || isFocused)) {
-                    Text(
-                        text = sub,
-                        color = if (isFocused) Color(0xFFB0C4DE) else TextSecondary.copy(alpha = 0.8f),
-                        fontSize = if (isCompact) 8.5.sp else 9.5.sp,
-                        fontWeight = FontWeight.Normal,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
+                    // Line 2: Abbreviated description (always on TV scale, or on focused row in compact phone mode)
+                    val sub = getProgramSubtitle(item.program)
+                    if (sub.isNotEmpty() && (!isCompact || isFocused)) {
+                        Text(
+                            text = sub,
+                            color = if (isFocused) Color(0xFFB0C4DE) else TextSecondary.copy(alpha = 0.8f),
+                            fontSize = if (isCompact) 8.5.sp else 9.5.sp,
+                            fontWeight = FontWeight.Normal,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (isFocused) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = "Play",
+                        tint = ArchiveAmberLight,
+                        modifier = Modifier.size(if (isCompact) 14.dp else 16.dp),
                     )
                 }
-            }
-            if (isFocused) {
-                Icon(
-                    imageVector = Icons.Filled.PlayArrow,
-                    contentDescription = "Play",
-                    tint = AccentColor,
-                    modifier = Modifier.size(if (isCompact) 14.dp else 16.dp),
-                )
             }
         }
     }
@@ -660,7 +816,7 @@ private fun ProgramDetailsCard(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                text = "${timeFmt.format(Date(program.startMs))} – ${timeFmt.format(Date(program.endMs))}",
+                text = EpgDateFormat.programLabel(program.startMs, program.endMs, separator = " – "),
                 color = AccentBlue,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold,

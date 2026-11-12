@@ -91,6 +91,20 @@ class KeyEventHandler(
             return false
         }
 
+        // ── Sort menu (opened from the ⇅ top bar button) captures all D-Pad keys ──
+        if (state.isSortMenuOpen) {
+            longPressDetector.reset()
+            when (keyCode) {
+                KeyEvent.KEYCODE_BACK,
+                KeyEvent.KEYCODE_ESCAPE,
+                KeyEvent.KEYCODE_DPAD_LEFT -> onIntent(ChannelListIntent.CloseSortMenu)
+                KeyEvent.KEYCODE_DPAD_UP -> onIntent(ChannelListIntent.MoveSortMenuFocus(-1))
+                KeyEvent.KEYCODE_DPAD_DOWN -> onIntent(ChannelListIntent.MoveSortMenuFocus(1))
+                else -> Unit // OK is applied on KEY_UP
+            }
+            return true
+        }
+
         if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE) {
             when {
                 state.isProgramDetailsOpen -> {
@@ -131,6 +145,11 @@ class KeyEventHandler(
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                 when {
+                    state.isSortFocused -> {
+                        // Menu opens on KEY_UP so the same press doesn't immediately pick an option
+                        longPressDetector.reset()
+                        true
+                    }
                     state.isVodFocused -> {
                         longPressDetector.reset()
                         onOpenVod()
@@ -180,7 +199,12 @@ class KeyEventHandler(
         KeyEvent.KEYCODE_DPAD_RIGHT -> {
             when {
                 state.isGroupFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.VOD))
-                state.isVodFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.SEARCH))
+                state.isVodFocused -> onIntent(
+                    ChannelListIntent.MoveTopBarFocus(
+                        if (state.viewMode == ScreenViewMode.CHANNELS) TopBarFocus.SORT else TopBarFocus.SEARCH,
+                    ),
+                )
+                state.isSortFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.SEARCH))
                 state.isSearchFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.SETTINGS))
                 state.viewMode == ScreenViewMode.FOLDERS -> {
                     val count = state.folders.size
@@ -210,7 +234,12 @@ class KeyEventHandler(
         KeyEvent.KEYCODE_DPAD_LEFT -> {
             when {
                 state.isSettingsFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.SEARCH))
-                state.isSearchFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.VOD))
+                state.isSearchFocused -> onIntent(
+                    ChannelListIntent.MoveTopBarFocus(
+                        if (state.viewMode == ScreenViewMode.CHANNELS) TopBarFocus.SORT else TopBarFocus.VOD,
+                    ),
+                )
+                state.isSortFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.VOD))
                 state.isVodFocused -> onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.GROUP_SELECTOR))
                 state.viewMode == ScreenViewMode.FOLDERS -> {
                     val cur = state.focusedFolderIndex
@@ -374,6 +403,27 @@ class KeyEventHandler(
 
         if (state.isContextMenuOpen) {
             return false
+        }
+
+        if (state.isSortMenuOpen) {
+            longPressDetector.reset()
+            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                keyCode == KeyEvent.KEYCODE_ENTER ||
+                keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+            ) {
+                val modes = ChannelSortMode.values()
+                val mode = modes.getOrNull(state.sortMenuFocusedIndex) ?: ChannelSortMode.NONE
+                onIntent(ChannelListIntent.SelectSortMode(mode))
+            }
+            return true
+        }
+
+        if (state.isSortFocused &&
+            (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
+        ) {
+            longPressDetector.reset()
+            onIntent(ChannelListIntent.OpenSortMenu)
+            return true
         }
 
         return when (keyCode) {

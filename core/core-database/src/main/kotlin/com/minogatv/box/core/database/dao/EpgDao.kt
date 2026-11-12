@@ -183,6 +183,52 @@ abstract class EpgDao {
     @Query("SELECT MAX(end_ms) FROM epg_program")
     abstract suspend fun getLatestProgramEndMs(): Long?
 
+    /**
+     * Number of distinct channels that have at least one programme ending after [afterMs].
+     * Used for per-channel EPG coverage (horizon) checks instead of a global MAX(end_ms).
+     */
+    @Query("SELECT COUNT(DISTINCT channel_epg_id) FROM epg_program WHERE end_ms > :afterMs")
+    abstract suspend fun countChannelsWithProgramsEndingAfter(afterMs: Long): Int
+
+    /** Deletes programmes of one channel whose start lies in [fromMs]..[toMs] (inclusive). */
+    @Query(
+        """
+        DELETE FROM epg_program
+        WHERE channel_epg_id = :channelEpgId
+          AND start_ms >= :fromMs
+          AND start_ms <= :toMs
+        """,
+    )
+    abstract suspend fun deleteChannelRange(channelEpgId: String, fromMs: Long, toMs: Long): Int
+
+    /** Deletes programmes of several channels whose start lies in [fromMs]..[toMs] (inclusive). */
+    @Query(
+        """
+        DELETE FROM epg_program
+        WHERE channel_epg_id IN (:channelEpgIds)
+          AND start_ms >= :fromMs
+          AND start_ms <= :toMs
+        """,
+    )
+    abstract suspend fun deleteChannelsRange(channelEpgIds: List<String>, fromMs: Long, toMs: Long): Int
+
+    /**
+     * Atomically replaces the schedule of one channel inside the time range covered by [programs].
+     * Prevents duplicate rows (the primary key is auto-generated, so plain REPLACE would duplicate).
+     */
+    @androidx.room.Transaction
+    open suspend fun replaceChannelRange(channelEpgId: String, fromMs: Long, toMs: Long, programs: List<EpgProgramEntity>) {
+        deleteChannelRange(channelEpgId, fromMs, toMs)
+        programs.chunked(5000).forEach { chunk -> upsertAll(chunk) }
+    }
+
+    /** Atomically replaces the schedules of several channels inside [fromMs]..[toMs]. */
+    @androidx.room.Transaction
+    open suspend fun replaceChannelsRange(channelEpgIds: List<String>, fromMs: Long, toMs: Long, programs: List<EpgProgramEntity>) {
+        channelEpgIds.chunked(400).forEach { ids -> deleteChannelsRange(ids, fromMs, toMs) }
+        programs.chunked(5000).forEach { chunk -> upsertAll(chunk) }
+    }
+
     // ─── FTS full-text search ─────────────────────────────────────────────────
 
     /**

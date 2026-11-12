@@ -97,6 +97,7 @@ class EpgSyncManager @Inject constructor(
         epgUrl: String? = null,
         playlistId: Long = 1L,
         forceRefresh: Boolean = false,
+        quiet: Boolean = false,
     ): Job {
         val targetScope = scope ?: syncScope
         if (forceRefresh) {
@@ -104,10 +105,38 @@ class EpgSyncManager @Inject constructor(
             isSyncing.set(false)
         }
         val job = targetScope.launch(Dispatchers.IO) {
-            syncEpg(epgUrl, playlistId, forceRefresh)
+            syncEpg(epgUrl, playlistId, forceRefresh, quiet = quiet)
         }
         currentSyncJob = job
         return job
+    }
+
+    /**
+     * Per-channel EPG horizon check.
+     *
+     * Counts distinct channels that still have programmes ending after now+12h versus distinct
+     * channels that have any programme ending after now. Returns true (= refresh needed) when
+     * fewer than 80% of the active channels are covered for the next 12 hours, or the DB is empty.
+     */
+    suspend fun isEpgCoverageLow(now: Long = System.currentTimeMillis()): Boolean = withContext(Dispatchers.IO) {
+        val active = runCatching { epgDao.countChannelsWithProgramsEndingAfter(now) }.getOrDefault(0)
+        if (active <= 0) return@withContext true
+        val covered = runCatching { epgDao.countChannelsWithProgramsEndingAfter(now + 12 * 3600_000L) }.getOrDefault(0)
+        covered.toDouble() < active.toDouble() * 0.8
+    }
+
+    /** True when an EPG sync succeeded less than [withinMs] ago (persisted across restarts). */
+    fun wasSyncedRecently(withinMs: Long): Boolean {
+        val last = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+            .getLong(PREF_LAST_EPG_SUCCESS_MS, 0L)
+        return last > 0L && System.currentTimeMillis() - last in 0 until withinMs
+    }
+
+    private fun markSyncSuccess() {
+        runCatching {
+            context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+                .edit().putLong(PREF_LAST_EPG_SUCCESS_MS, System.currentTimeMillis()).apply()
+        }
     }
 
     /**
@@ -124,6 +153,7 @@ class EpgSyncManager @Inject constructor(
         playlistId: Long = 1L,
         forceRefresh: Boolean = false,
         onProgress: (suspend (Int, String) -> Unit)? = null,
+        quiet: Boolean = false,
     ): Result<Int> = withContext(Dispatchers.IO) {
         if (!isSyncing.compareAndSet(false, true)) {
             // Already running
@@ -134,22 +164,27 @@ class EpgSyncManager @Inject constructor(
         var lastBatchReport = 0L
 
         suspend fun updateProgress(pct: Int, status: String) {
-            _syncProgress.value = SyncScheduler.EpgSyncInfo(
-                progress = (pct / 100f).coerceIn(0.01f, 1f),
-                status = status,
-            )
+            if (!quiet) {
+                _syncProgress.value = SyncScheduler.EpgSyncInfo(
+                    progress = (pct / 100f).coerceIn(0.01f, 1f),
+                    status = status,
+                )
+            }
             onProgress?.invoke(pct, status)
         }
 
         val now = System.currentTimeMillis()
-        val latestProgramEnd = epgDao.getLatestProgramEndMs()
         val validCount = epgDao.getValidProgramsCount(now)
 
-        // If not forcing refresh, and we have enough future programs (valid for > 24 hours),
-        // keep local EPG and avoid redundant heavy download over network.
-        if (!forceRefresh && validCount > 300 && latestProgramEnd != null && (latestProgramEnd - now) > 24 * 3600_000L) {
+        // If not forcing refresh, keep local EPG when most channels are covered for the next 12 h.
+        // Per-channel coverage replaces the old global MAX(end_ms) test: a handful of channels with a
+        // week of programmes no longer hides the fact that the rest end this evening.
+        // A short cool-down avoids re-downloading when the source simply publishes no further data.
+        val coverageLow = isEpgCoverageLow(now)
+        val skipRefresh = validCount > 300 && (!coverageLow || wasSyncedRecently(2 * 3600_000L))
+        if (!forceRefresh && skipRefresh) {
             updateProgress(100, "Телепрограмма актуальна ($validCount передач)")
-            delay(600)
+            if (!quiet) delay(600)
             _syncProgress.value = null
             isSyncing.set(false)
             piconResolver.resolveMissingLogos()
@@ -220,6 +255,7 @@ class EpgSyncManager @Inject constructor(
                         piconResolver.cacheAllRemoteLogos()
                         updateProgress(100, "Телепрограмма с сервера загружена ($importedCount передач)")
                         _lastSyncTime.value = System.currentTimeMillis()
+                        markSyncSuccess()
                         delay(1000)
                         _syncProgress.value = null
                         return@withContext Result.success(importedCount)
@@ -282,6 +318,7 @@ class EpgSyncManager @Inject constructor(
                 val validCountNow = epgDao.getValidProgramsCount(now)
                 updateProgress(100, "Телепрограмма актуальна ($validCountNow передач)")
                 _lastSyncTime.value = System.currentTimeMillis()
+                markSyncSuccess()
                 delay(1000)
                 _syncProgress.value = null
                 piconResolver.cacheAllRemoteLogos()
@@ -396,6 +433,7 @@ class EpgSyncManager @Inject constructor(
             val total = programCount.get()
             updateProgress(100, "Телепрограмма обновлена ($total передач)")
             _lastSyncTime.value = System.currentTimeMillis()
+            markSyncSuccess()
             delay(1200)
             _syncProgress.value = null
 
@@ -737,7 +775,11 @@ class EpgSyncManager @Inject constructor(
             }
 
             if (batchEntities.isNotEmpty()) {
-                epgDao.upsertAll(batchEntities)
+                // Replace (not append) the returned window so repeated refreshes don't duplicate rows.
+                val ids = batchEntities.mapTo(HashSet()) { it.channelEpgId }.toList()
+                val fromMs = batchEntities.minOf { it.startMs }
+                val toMs = batchEntities.maxOf { it.startMs }
+                epgDao.replaceChannelsRange(ids, fromMs, toMs, batchEntities)
                 val tot = totalImported.addAndGet(batchEntities.size)
                 val pct = (50 + ((chunkIdx + 1) * 45 / chunks.size.coerceAtLeast(1))).coerceIn(50, 95)
                 onProgress(pct, "Импорт готовой программы… ($tot передач)")
@@ -937,6 +979,124 @@ class EpgSyncManager @Inject constructor(
         return@withContext false
     }
 
+    /** channelId -> epoch ms of the last extended per-channel fetch (30 min TTL). */
+    private val channelFetchTimes = java.util.concurrent.ConcurrentHashMap<Long, Long>()
+
+    /**
+     * True when the app uses the shared ⚡ Live EPG from the Minoga server (no own XMLTV link).
+     * Per-channel extended fetches only make sense in this mode.
+     */
+    fun isLiveServerEpgMode(): Boolean {
+        val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+        val custom = prefs.getString("custom_epg_url", null)?.trim()?.takeIf { it.isNotBlank() }
+        return custom == null || custom.equals(Playlist.LIVE_SERVER_EPG, ignoreCase = true) || isDefaultFallbackUrl(custom)
+    }
+
+    /**
+     * Lazily extends the schedule of a single channel from the server
+     * (`/api/tv/epg/channel`, window now−7d … now+3d).
+     *
+     * - Only in Live EPG mode (own XMLTV data is already local).
+     * - Each channel is fetched at most once per 30 minutes.
+     * - Descriptions of programmes that ended more than 24 h ago are truncated to 150 chars.
+     * - Rows are stored under the same `channel_epg_id` the global server sync uses.
+     *
+     * @return true when new programmes were stored.
+     */
+    suspend fun fetchExtendedChannelSchedule(channelId: Long): Boolean = withContext(Dispatchers.IO) {
+        if (isSyncing.get()) return@withContext false
+        if (!isLiveServerEpgMode()) return@withContext false
+        val nowMs = System.currentTimeMillis()
+        val last = channelFetchTimes[channelId]
+        if (last != null && nowMs - last < CHANNEL_FETCH_TTL_MS) return@withContext false
+        channelFetchTimes[channelId] = nowMs
+
+        val channel = channelDao.getById(channelId) ?: return@withContext false
+        val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+        val cleanBase = (prefs.getString("web_config_url", null)?.trim()?.takeIf { it.isNotBlank() }
+            ?: Playlist.DEFAULT_WEB_CONFIG_URL).trimEnd('/')
+        val serverBases = listOf(
+            "https://minogatvbox.duckdns.org",
+            if (cleanBase.startsWith("http://", ignoreCase = true)) "https://" + cleanBase.removePrefix("http://") else cleanBase,
+        ).distinct()
+
+        val client = try {
+            clientFactory.create(Playlist(id = 0L, profileId = 1L, name = "ChannelEpg", url = ""))
+                .newBuilder()
+                .connectTimeout(6, TimeUnit.SECONDS)
+                .readTimeout(12, TimeUnit.SECONDS)
+                .build()
+        } catch (_: Exception) {
+            return@withContext false
+        }
+
+        val urlEnc = URLEncoder.encode(Playlist.DEFAULT_EPG_URL, "UTF-8")
+        val tvgEnc = URLEncoder.encode(channel.epgChannelId.trim(), "UTF-8")
+        val nameEnc = URLEncoder.encode(channel.name.trim(), "UTF-8")
+
+        for (base in serverBases) {
+            try {
+                val req = Request.Builder()
+                    .url("$base/api/tv/epg/channel?url=$urlEnc&tvgId=$tvgEnc&name=$nameEnc")
+                    .header("Accept", "application/json")
+                    .get()
+                    .build()
+                val bodyStr = client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) resp.body?.string() else null
+                } ?: continue
+                if (!bodyStr.startsWith("{")) continue
+                val obj = JSONObject(bodyStr)
+                val status = obj.optString("status")
+                val progs = obj.optJSONArray("programs")
+                if (progs == null || progs.length() == 0) {
+                    // Server reachable but nothing for this channel (or still indexing) — don't try other bases.
+                    if (status.isNotBlank() && status != "READY") channelFetchTimes.remove(channelId)
+                    return@withContext false
+                }
+
+                val effectiveEpgId = channel.epgChannelId.trim().ifEmpty { "srv_epg_${channel.id}" }
+                val archiveCutoff = nowMs - 24 * 3600_000L
+                val entities = ArrayList<EpgProgramEntity>(progs.length())
+                for (i in 0 until progs.length()) {
+                    val p = progs.optJSONObject(i) ?: continue
+                    val s = p.optLong("s", 0L)
+                    val e = p.optLong("e", 0L)
+                    val t = p.optString("t").trim()
+                    if (s <= 0L || e <= s || t.isEmpty()) continue
+                    var d = p.optString("d").trim()
+                    if (e < archiveCutoff && d.length > ARCHIVE_DESC_MAX_CHARS) {
+                        d = d.take(ARCHIVE_DESC_MAX_CHARS).trimEnd() + "…"
+                    }
+                    entities.add(
+                        EpgProgramEntity(
+                            channelEpgId = effectiveEpgId,
+                            title = t,
+                            description = d,
+                            startMs = s,
+                            endMs = e,
+                        )
+                    )
+                }
+                if (entities.isEmpty()) return@withContext false
+
+                if (channel.epgChannelId != effectiveEpgId) {
+                    channelDao.updateEpgAndLogos(
+                        listOf(ChannelDao.ChannelEpgLogoUpdate(id = channel.id, epgChannelId = effectiveEpgId, logoUrl = null))
+                    )
+                }
+                val fromMs = entities.minOf { it.startMs }
+                val toMs = entities.maxOf { it.startMs }
+                epgDao.replaceChannelRange(effectiveEpgId, fromMs, toMs, entities)
+                return@withContext true
+            } catch (_: Exception) {
+                // try next base
+            }
+        }
+        // Network failure: allow a retry sooner than the full TTL.
+        channelFetchTimes[channelId] = nowMs - CHANNEL_FETCH_TTL_MS + 5 * 60_000L
+        return@withContext false
+    }
+
     /**
      * Downloads and parses an XMLTV feed filtered strictly for [channels].
      */
@@ -1044,6 +1204,9 @@ class EpgSyncManager @Inject constructor(
     }
 
     companion object {
+        private const val PREF_LAST_EPG_SUCCESS_MS = "epg_last_success_ms"
+        private const val CHANNEL_FETCH_TTL_MS = 30 * 60_000L
+        private const val ARCHIVE_DESC_MAX_CHARS = 150
         val FALLBACK_EPG_SOURCES = listOf(
             Playlist.DEFAULT_EPG_URL,
             Playlist.DEFAULT_PUBLIC_EPG_URL,

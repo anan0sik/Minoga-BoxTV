@@ -29,6 +29,7 @@ dependencies {
     implementation(project(":core:core-model"))
     implementation(project(":core:core-database"))
     implementation(project(":core:core-data"))
+    implementation(project(":core:core-network"))
 
     // Compose (phone)
     implementation(platform(libs.compose.bom))

@@ -18,6 +18,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.runtime.rememberUpdatedState
@@ -99,7 +100,9 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.minogatv.box.core.network.SmartDohDns
 import com.minogatv.box.feature.player.IptvMediaSourceHelper
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -213,9 +216,14 @@ fun ChannelListScreen(
             .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
             .build()
 
+        val previewHttpDataSourceFactory = OkHttpDataSource.Factory(
+            SmartDohDns.getStreamingOkHttpClient(context)
+        ).setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+
         ExoPlayer.Builder(context)
             .setLoadControl(loadControl)
             .setTrackSelector(previewTrackSelector)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(previewHttpDataSourceFactory))
             .setAudioAttributes(previewAudioAttributes, /* handleAudioFocus = */ false)
             .build().apply {
                 volume = 0f
@@ -293,6 +301,7 @@ fun ChannelListScreen(
                     previewPlayer.clearMediaItems()
                 }
                 Lifecycle.Event.ON_RESUME -> {
+                    viewModel.syncWithPlayerSelection()
                     syncPreviewPlayback()
                     runCatching {
                         if (currentUiState.viewMode == ScreenViewMode.CHANNELS) {
@@ -401,6 +410,11 @@ fun ChannelListScreen(
 
     BackHandler(enabled = !uiState.isExitConfirmOpen && !uiState.isContextMenuOpen && !uiState.isProgramDetailsOpen && !uiState.isFocusInSidePanel && !uiState.isSearchOpen && uiState.pendingPinFolder == null && uiState.viewMode == ScreenViewMode.FOLDERS) {
         viewModel.onIntent(ChannelListIntent.ShowExitConfirm)
+    }
+
+    // Sort menu has the highest priority for system Back (declared last)
+    BackHandler(enabled = !uiState.isExitConfirmOpen && uiState.isSortMenuOpen) {
+        viewModel.onIntent(ChannelListIntent.CloseSortMenu)
     }
 
     // ── Navigation events from ViewModel ─────────────────────────────────────
@@ -542,6 +556,12 @@ fun ChannelListScreen(
                     } else {
                         viewModel.onIntent(ChannelListIntent.FocusTopBar(TopBarFocus.GROUP_SELECTOR))
                     }
+                },
+                sortMode = uiState.sortMode,
+                isSortFocused = uiState.isSortFocused,
+                onSortClick = {
+                    viewModel.onIntent(ChannelListIntent.MoveTopBarFocus(TopBarFocus.SORT))
+                    viewModel.onIntent(ChannelListIntent.OpenSortMenu)
                 },
             )
 
@@ -767,38 +787,36 @@ fun ChannelListScreen(
             }
 
             // ── Main content: Folders grid OR Channels 2-column split ─
-            if (uiState.folders.isEmpty() && uiState.channels.isEmpty()) {
-                if (uiState.isLoading) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(
-                                color = ChannelDesignTokens.NeonCyan,
-                                modifier = Modifier.size(48.dp),
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = "Загрузка каналов…",
-                                color = ChannelDesignTokens.TextSecondary,
-                                fontSize = 16.sp,
-                            )
-                        }
+            if (uiState.isLoading && uiState.folders.isEmpty() && uiState.channels.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(
+                            color = ChannelDesignTokens.NeonCyan,
+                            modifier = Modifier.size(48.dp),
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Загрузка каналов…",
+                            color = ChannelDesignTokens.TextSecondary,
+                            fontSize = 16.sp,
+                        )
                     }
-                } else {
-                    // Empty state when no channels or playlists are loaded
-                    EmptyChannelsView(
-                        isSettingsFocused = uiState.isSettingsFocused,
-                        onOpenSettings = onNavigateToSettings,
-                        onOpenVod = onNavigateToVod,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                    )
                 }
+            } else if (uiState.folders.isEmpty() && uiState.channels.isEmpty()) {
+                // Empty state when no channels or playlists are loaded
+                EmptyChannelsView(
+                    isSettingsFocused = uiState.isSettingsFocused,
+                    onOpenSettings = onNavigateToSettings,
+                    onOpenVod = onNavigateToVod,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                )
             } else if (uiState.viewMode == ScreenViewMode.FOLDERS) {
                 // Окно 1: Сетка тематических папок (Stitch Category Grid — 2 колонки в портрете, 4 в ландшафте)
                 FolderGrid(
@@ -1195,6 +1213,28 @@ fun ChannelListScreen(
             )
         }
 
+        // ── Channel sort menu (in-window overlay so D-pad keys keep flowing through KeyEventHandler)
+        if (uiState.isSortMenuOpen && uiState.viewMode == ScreenViewMode.CHANNELS) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { viewModel.onIntent(ChannelListIntent.CloseSortMenu) },
+            ) {
+                ChannelSortMenu(
+                    current = uiState.sortMode,
+                    focusedIndex = uiState.sortMenuFocusedIndex,
+                    isCompact = isCompactScreen,
+                    onSelect = { mode -> viewModel.onIntent(ChannelListIntent.SelectSortMode(mode)) },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = if (isCompactScreen) 40.dp else 64.dp, end = if (isCompactScreen) 10.dp else 24.dp),
+                )
+            }
+        }
+
         // ── Exit Confirmation Dialog
         if (uiState.isExitConfirmOpen) {
             ExitConfirmDialog(
@@ -1269,11 +1309,26 @@ private fun ChannelList(
                 .padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = "В этой папке нет каналов",
-                color = Color.White.copy(alpha = 0.5f),
-                fontSize = (16 * scaleFactor).coerceAtLeast(12f).sp,
-            )
+            if (uiState.isLoading) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(
+                        color = ChannelDesignTokens.NeonCyan,
+                        modifier = Modifier.size(36.dp),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Загрузка каналов…",
+                        color = ChannelDesignTokens.TextSecondary,
+                        fontSize = (15 * scaleFactor).coerceAtLeast(12f).sp,
+                    )
+                }
+            } else {
+                Text(
+                    text = "В этой папке нет каналов",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = (16 * scaleFactor).coerceAtLeast(12f).sp,
+                )
+            }
         }
         return
     }
@@ -1718,6 +1773,74 @@ private fun ContextMenuSheet(
     }
 }
 
+// ─── Channel sort menu ────────────────────────────────────────────────────────
+
+@Composable
+private fun ChannelSortMenu(
+    current: ChannelSortMode,
+    focusedIndex: Int,
+    isCompact: Boolean,
+    onSelect: (ChannelSortMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .width(if (isCompact) 230.dp else 300.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xF20D111A))
+            .border(1.dp, ChannelDesignTokens.NeonCyan.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+            // swallow taps so they don't close the menu through the scrim
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            .padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "СОРТИРОВКА КАНАЛОВ",
+            color = ChannelDesignTokens.NeonCyan,
+            fontSize = if (isCompact) 10.sp else 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+        ChannelSortMode.values().forEachIndexed { idx, mode ->
+            val isFocused = idx == focusedIndex
+            val isSelected = mode == current
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (isFocused) Color(0x4000E5FF) else Color.Transparent)
+                    .border(
+                        width = if (isFocused) 2.dp else 0.dp,
+                        color = if (isFocused) ChannelDesignTokens.NeonCyan else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp),
+                    )
+                    .clickable { onSelect(mode) }
+                    .padding(horizontal = 12.dp, vertical = if (isCompact) 7.dp else 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = mode.menuLabel,
+                    color = if (isFocused) Color.White else TextPrimary,
+                    fontSize = if (isCompact) 12.sp else 14.sp,
+                    fontWeight = if (isFocused || isSelected) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (isSelected) {
+                    Text(
+                        text = "✓",
+                        color = ChannelDesignTokens.NeonCyan,
+                        fontSize = if (isCompact) 13.sp else 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+    }
+}
+
 // ─── Top Bar ──────────────────────────────────────────────────────────────────
 
 @Composable
@@ -1740,6 +1863,9 @@ private fun TopBar(
     onBackToFoldersClick: () -> Unit,
     onGroupClick: () -> Unit,
     modifier: Modifier = Modifier,
+    sortMode: ChannelSortMode = ChannelSortMode.NONE,
+    isSortFocused: Boolean = false,
+    onSortClick: () -> Unit = {},
 ) {
     Row(
         modifier = modifier
@@ -1928,6 +2054,35 @@ private fun TopBar(
                         color = if (isVodFocused) Color.White else TextPrimary,
                         fontSize = if (isCompact) 11.5.sp else 13.sp,
                         fontWeight = if (isVodFocused) FontWeight.Bold else FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+
+            // Sort button (channels view only) — opens the А–Я / Я–А / playlist order menu
+            if (viewMode == ScreenViewMode.CHANNELS) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (isSortFocused) Color(0x4000E5FF) else Color(0xCC131826))
+                        .border(
+                            width = if (isSortFocused) 2.dp else 1.dp,
+                            color = if (isSortFocused) ChannelDesignTokens.NeonCyan else Color(0x2B00E5FF),
+                            shape = RoundedCornerShape(10.dp),
+                        )
+                        .clickable(onClick = onSortClick)
+                        .padding(
+                            horizontal = if (isPortrait) 8.dp else if (isCompact) 10.dp else 14.dp,
+                            vertical = if (isCompact) 4.dp else 8.dp,
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (isPortrait) "⇅" else sortMode.buttonLabel,
+                        color = if (isSortFocused) Color.White else TextPrimary,
+                        fontSize = if (isCompact) 11.5.sp else 13.sp,
+                        fontWeight = if (isSortFocused) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1,
                         softWrap = false,
                     )

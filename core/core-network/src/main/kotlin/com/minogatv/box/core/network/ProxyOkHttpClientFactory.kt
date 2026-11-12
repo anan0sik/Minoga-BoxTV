@@ -38,6 +38,9 @@ class ProxyOkHttpClientFactory @Inject constructor() {
      */
     fun create(playlist: Playlist, enableLogging: Boolean = false): OkHttpClient {
         return OkHttpClient.Builder().apply {
+            // ── Smart DoH DNS (bypasses ISP DNS spoofing) ─────────────────────
+            dns(SmartDohDns)
+
             // ── Timeouts & Redirects ──────────────────────────────────────────
             connectTimeout(CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
             readTimeout(READ_TIMEOUT_SEC, TimeUnit.SECONDS)

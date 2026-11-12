@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -35,6 +36,7 @@ import android.content.Context
 import com.minogatv.box.core.database.dao.PlaylistDao
 import com.minogatv.box.core.data.repository.ChannelRepository
 import com.minogatv.box.core.data.repository.EpgRepository
+import com.minogatv.box.core.data.sync.EpgSyncManager
 import com.minogatv.box.core.data.sync.SyncScheduler
 import com.minogatv.box.core.model.Playlist
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -64,13 +66,27 @@ class ChannelListViewModel @Inject constructor(
     private val syncScheduler: SyncScheduler,
     private val channelRepository: ChannelRepository,
     private val epgRepository: EpgRepository,
+    private val epgSyncManager: EpgSyncManager,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     // ─── Mutable state ────────────────────────────────────────────────────────
 
-    private val _uiState = MutableStateFlow(ChannelListUiState(isLoading = false))
+    private val _uiState = MutableStateFlow(
+        ChannelListUiState(isLoading = true, sortMode = ChannelSorter.readMode(context)),
+    )
     val uiState: StateFlow<ChannelListUiState> = _uiState.asStateFlow()
+
+    /** Sorts channel entities by the current global sort mode (call off the main thread). */
+    private fun sortEntities(list: List<ChannelEntity>): List<ChannelEntity> =
+        ChannelSorter.sort(list, _uiState.value.sortMode) { it.name }
+
+    /** Job for the lazy per-channel extended EPG fetch (/api/tv/epg/channel). */
+    private var sidePanelExtendJob: Job? = null
+
+    /** Set to true once the initial Room DB restore check finishes on startup. */
+    @Volatile
+    private var initialRestoreCompleted: Boolean = false
 
     private val _navigationEvent = MutableSharedFlow<ChannelListNavEvent>(extraBufferCapacity = 1)
     val navigationEvent: SharedFlow<ChannelListNavEvent> = _navigationEvent.asSharedFlow()
@@ -104,6 +120,7 @@ class ChannelListViewModel @Inject constructor(
         observeChannels()
         observeEpgSyncProgress()
         checkAndAutoLoadEpg()
+        startPeriodicEpgCheck()
         resolveMissingLogosAndEpg()
         restoreLastFolder()
     }
@@ -146,11 +163,13 @@ class ChannelListViewModel @Inject constructor(
                 lastFolder
             }
 
-            val targetChannels = if (effectiveFolder == "Все каналы" && rawChannels.isEmpty()) {
-                channelDao.getAllByProfile(profileId)
-            } else {
-                rawChannels
-            }
+            val targetChannels = sortEntities(
+                if (effectiveFolder == "Все каналы" && rawChannels.isEmpty()) {
+                    channelDao.getAllByProfile(profileId)
+                } else {
+                    rawChannels
+                },
+            )
 
             if (targetChannels.isNotEmpty()) {
                 val forcedCatchup = getForcedCatchupType()
@@ -167,6 +186,7 @@ class ChannelListViewModel @Inject constructor(
                 }
 
                 withContext(Dispatchers.Main) {
+                    initialRestoreCompleted = true
                     selectedGroup.value = effectiveFolder
                     _uiState.update { state ->
                         state.copy(
@@ -189,6 +209,13 @@ class ChannelListViewModel @Inject constructor(
                         _uiState.update { state ->
                             state.copy(channels = enrichedItems)
                         }
+                    }
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    initialRestoreCompleted = true
+                    _uiState.update { state ->
+                        state.copy(isLoading = false)
                     }
                 }
             }
@@ -226,9 +253,14 @@ class ChannelListViewModel @Inject constructor(
             val isAutoEpgEnabled = prefs.getBoolean("auto_epg_sync", true)
             if (!isAutoEpgEnabled) return@launch
 
-            // Check if there are current valid programmes in DB
-            val validCount = epgDao.getValidProgramsCount(System.currentTimeMillis())
-            if (validCount == 0) {
+            // Check if there are current valid programmes in DB, and whether most channels are
+            // still covered for the next 12 h (per-channel horizon, same rule as EpgSyncManager).
+            val now = System.currentTimeMillis()
+            val validCount = epgDao.getValidProgramsCount(now)
+            val coverageLow = validCount > 0 &&
+                epgSyncManager.isEpgCoverageLow(now) &&
+                !epgSyncManager.wasSyncedRecently(2L * 3600_000L)
+            if (validCount == 0 || coverageLow) {
                 val playlists = playlistDao.getAll()
                 val customEpg = prefs.getString("custom_epg_url", null)?.trim()?.takeIf { it.isNotBlank() }
                 val defaultEpg = customEpg?.let { Playlist.normalizeUrl(it) } ?: Playlist.DEFAULT_EPG_URL
@@ -241,6 +273,38 @@ class ChannelListViewModel @Inject constructor(
                     }
                 } else {
                     syncScheduler.triggerManualEpgSync(1L, defaultEpg)
+                }
+            }
+        }
+    }
+
+    /**
+     * Quiet EPG horizon check every 3 h while the ViewModel lives.
+     * Runs the sync without the progress bar and only if per-channel coverage is low.
+     */
+    private fun startPeriodicEpgCheck() {
+        viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                delay(PERIODIC_EPG_CHECK_MS)
+                try {
+                    val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+                    if (!prefs.getBoolean("auto_epg_sync", true)) continue
+                    if (!epgSyncManager.isEpgCoverageLow() || epgSyncManager.wasSyncedRecently(2L * 3600_000L)) continue
+                    val customEpg = prefs.getString("custom_epg_url", null)?.trim()?.takeIf { it.isNotBlank() }
+                    val playlist = playlistDao.getAll().firstOrNull()
+                    val rawUrl = customEpg ?: playlist?.epgUrl?.takeIf { it.isNotBlank() } ?: Playlist.DEFAULT_EPG_URL
+                    epgSyncManager.triggerSync(
+                        epgUrl = Playlist.normalizeUrl(rawUrl),
+                        playlistId = playlist?.id ?: 1L,
+                        forceRefresh = false,
+                        quiet = true,
+                    ).join()
+                    val now = System.currentTimeMillis()
+                    nowMs.value = now
+                    withContext(Dispatchers.Main) { refreshCurrentProgramsInPlace(now) }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
                 }
             }
         }
@@ -295,6 +359,60 @@ class ChannelListViewModel @Inject constructor(
             is ChannelListIntent.CloseProgramDetails -> _uiState.update { it.copy(isProgramDetailsOpen = false) }
             is ChannelListIntent.ShowExitConfirm    -> _uiState.update { it.copy(isExitConfirmOpen = true) }
             is ChannelListIntent.DismissExitConfirm -> _uiState.update { it.copy(isExitConfirmOpen = false) }
+            is ChannelListIntent.OpenSortMenu       -> _uiState.update {
+                it.copy(
+                    isSortMenuOpen = true,
+                    sortMenuFocusedIndex = ChannelSortMode.values().indexOf(it.sortMode).coerceAtLeast(0),
+                )
+            }
+            is ChannelListIntent.CloseSortMenu      -> _uiState.update { it.copy(isSortMenuOpen = false) }
+            is ChannelListIntent.MoveSortMenuFocus  -> _uiState.update {
+                val last = ChannelSortMode.values().lastIndex
+                it.copy(sortMenuFocusedIndex = (it.sortMenuFocusedIndex + intent.delta).coerceIn(0, last))
+            }
+            is ChannelListIntent.SelectSortMode     -> applySortMode(intent.mode)
+        }
+    }
+
+    // ─── Channel sorting ─────────────────────────────────────────────────────
+
+    private var resortJob: Job? = null
+
+    /**
+     * Persists the global sort mode and re-sorts the visible channel list off the main thread,
+     * keeping focus on the same channel id.
+     */
+    private fun applySortMode(mode: ChannelSortMode) {
+        ChannelSorter.saveMode(context, mode)
+        val previous = _uiState.value.sortMode
+        _uiState.update { it.copy(sortMode = mode, isSortMenuOpen = false) }
+        if (previous == mode) return
+        resortJob?.cancel()
+        resortJob = viewModelScope.launch {
+            val snapshot = _uiState.value.channels
+            if (snapshot.isEmpty()) return@launch
+            val sorted = withContext(Dispatchers.Default) {
+                if (mode == ChannelSortMode.NONE) {
+                    // Playlist order = DAO order (sort_order ASC, name ASC)
+                    snapshot.sortedWith(compareBy<ChannelDisplayItem>({ it.channel.sortOrder }, { it.channel.name }))
+                } else {
+                    ChannelSorter.sort(snapshot, mode) { it.channel.name }
+                }
+            }
+            val snapIds = snapshot.mapTo(HashSet(snapshot.size * 2)) { it.channel.id }
+            _uiState.update { state ->
+                // Bail out if the folder changed while sorting
+                if (state.channels.size != snapshot.size || state.channels.any { it.channel.id !in snapIds }) {
+                    return@update state
+                }
+                val focusedId = state.channels.getOrNull(state.focusedIndex)?.channel?.id
+                // Merge latest EPG data (by id) into the new order
+                val latestById = state.channels.associateBy { it.channel.id }
+                val merged = sorted.map { latestById[it.channel.id] ?: it }
+                val newFocus = focusedId?.let { id -> merged.indexOfFirst { it.channel.id == id } }?.takeIf { it >= 0 }
+                    ?: state.focusedIndex.coerceIn(0, (merged.size - 1).coerceAtLeast(0))
+                state.copy(channels = merged, focusedIndex = newFocus)
+            }
         }
     }
 
@@ -319,6 +437,9 @@ class ChannelListViewModel @Inject constructor(
                 channelDao.observeTotalCountByProfile(DEFAULT_PROFILE_ID),
                 favoriteDao.observeFavorites(DEFAULT_PROFILE_ID),
             ) { profileId, groups, totalCount, favorites ->
+                if (totalCount <= 0) {
+                    return@combine emptyList<ChannelFolderItem>()
+                }
                 val list = mutableListOf<ChannelFolderItem>()
 
                 list.add(
@@ -329,22 +450,20 @@ class ChannelListViewModel @Inject constructor(
                     ),
                 )
 
-                if (totalCount > 0) {
-                    list.add(
-                        ChannelFolderItem(
-                            title = "Все каналы",
-                            channelCount = totalCount,
-                            iconType = FolderIconType.ALL,
-                        ),
-                    )
-                    list.add(
-                        ChannelFolderItem(
-                            title = "Избранные каналы",
-                            channelCount = favorites.size,
-                            iconType = FolderIconType.FAVORITES,
-                        ),
-                    )
-                }
+                list.add(
+                    ChannelFolderItem(
+                        title = "Все каналы",
+                        channelCount = totalCount,
+                        iconType = FolderIconType.ALL,
+                    ),
+                )
+                list.add(
+                    ChannelFolderItem(
+                        title = "Избранные каналы",
+                        channelCount = favorites.size,
+                        iconType = FolderIconType.FAVORITES,
+                    ),
+                )
 
                 groups.forEach { g ->
                     if (g.group_title.isNotBlank()) {
@@ -372,7 +491,7 @@ class ChannelListViewModel @Inject constructor(
                     _uiState.update { state ->
                         state.copy(
                             folders = folders,
-                            isLoading = false,
+                            isLoading = state.isLoading && !initialRestoreCompleted,
                             focusedFolderIndex = state.focusedFolderIndex.coerceIn(0, (folders.size - 1).coerceAtLeast(0)),
                         )
                     }
@@ -408,10 +527,12 @@ class ChannelListViewModel @Inject constructor(
                             } else {
                                 channels
                             }
-                            Pair(filteredChannels, favSet)
+                            // Sorting runs on Dispatchers.Default (see flowOn below)
+                            Pair(sortEntities(filteredChannels), favSet)
                         }
                     }
                 }
+                .flowOn(Dispatchers.Default)
                 .catch { e ->
                     _uiState.update { it.copy(isLoading = false, errorMessage = e.message) }
                 }
@@ -467,7 +588,25 @@ class ChannelListViewModel @Inject constructor(
         return adultKeywords.any { lower.contains(it) }
     }
 
-    private fun selectFolder(folder: ChannelFolderItem) {
+    fun syncWithPlayerSelection() {
+        val state = _uiState.value
+        if (state.viewMode != ScreenViewMode.CHANNELS) return
+        val prefs = context.getSharedPreferences("minoga_tv_prefs", Context.MODE_PRIVATE)
+        val savedFolder = prefs.getString("last_selected_folder", null)
+        val lastWatchedId = prefs.getLong("last_watched_channel_id", -1L)
+        if (!savedFolder.isNullOrBlank() && savedFolder != state.selectedGroupName) {
+            val targetFolder = state.folders.find { it.title == savedFolder }
+                ?: ChannelFolderItem(title = savedFolder, channelCount = 0, iconType = FolderIconType.CATEGORY)
+            selectFolder(targetFolder, focusChannelId = lastWatchedId.takeIf { it > 0L })
+        } else if (lastWatchedId > 0L) {
+            val idx = state.channels.indexOfFirst { it.channel.id == lastWatchedId }
+            if (idx >= 0 && idx != state.focusedIndex) {
+                handleSelectChannelIndex(idx)
+            }
+        }
+    }
+
+    private fun selectFolder(folder: ChannelFolderItem, focusChannelId: Long? = null) {
         if (folder.iconType == FolderIconType.VOD) {
             _navigationEvent.tryEmit(ChannelListNavEvent.NavigateToVod)
             return
@@ -482,6 +621,7 @@ class ChannelListViewModel @Inject constructor(
         previewTimerJob?.cancel()
         sidePanelJob?.cancel()
         sidePanelFetchJob?.cancel()
+        sidePanelExtendJob?.cancel()
         selectFolderJob?.cancel()
 
         // Record folder usage for Stitch dynamic card sizing
@@ -520,11 +660,13 @@ class ChannelListViewModel @Inject constructor(
         selectFolderJob = viewModelScope.launch(Dispatchers.IO) {
             val profileId = activeProfileId.value
             val favIds = favoriteDao.getFavoriteIds(profileId).toSet()
-            val rawChannels = when (folder.title) {
-                "Все каналы" -> channelDao.getAllByProfile(profileId)
-                "Избранное" -> channelDao.getAllByProfile(profileId).filter { it.id in favIds }
-                else -> channelDao.getByGroup(profileId, folder.title)
-            }
+            val rawChannels = sortEntities(
+                when (folder.title) {
+                    "Все каналы" -> channelDao.getAllByProfile(profileId)
+                    "Избранное", "Избранные каналы" -> channelDao.getAllByProfile(profileId).filter { it.id in favIds }
+                    else -> channelDao.getByGroup(profileId, folder.title)
+                },
+            )
 
             val forcedCatchup = getForcedCatchupType()
 
@@ -543,11 +685,14 @@ class ChannelListViewModel @Inject constructor(
 
             withContext(Dispatchers.Main) {
                 if (selectedGroup.value == folder.title) {
+                    val targetFocusIdx = focusChannelId?.let { cid ->
+                        initialItems.indexOfFirst { it.channel.id == cid }.takeIf { it >= 0 }
+                    } ?: if (initialItems.isNotEmpty()) 0 else -1
                     _uiState.update { state ->
                         state.copy(
                             channels = initialItems,
                             isLoading = false,
-                            focusedIndex = if (initialItems.isNotEmpty()) 0 else -1,
+                            focusedIndex = targetFocusIdx,
                         )
                     }
                     if (initialItems.isNotEmpty()) {
@@ -589,12 +734,14 @@ class ChannelListViewModel @Inject constructor(
         previewTimerJob?.cancel()
         sidePanelJob?.cancel()
         sidePanelFetchJob?.cancel()
+        sidePanelExtendJob?.cancel()
         selectedGroup.value = ""
         _uiState.update {
             it.copy(
                 viewMode = ScreenViewMode.FOLDERS,
                 sidePanelItems = emptyList(),
                 isSidePanelOpen = false,
+                isSortMenuOpen = false,
                 isFocusInSidePanel = false,
                 isProgramDetailsOpen = false,
                 topBarFocus = TopBarFocus.NONE,
@@ -702,6 +849,7 @@ class ChannelListViewModel @Inject constructor(
         previewTimerJob?.cancel()
         sidePanelJob?.cancel()
         sidePanelFetchJob?.cancel()
+        sidePanelExtendJob?.cancel()
         _uiState.update {
             it.copy(
                 livePreviewChannelId = null,
@@ -727,6 +875,7 @@ class ChannelListViewModel @Inject constructor(
         previewTimerJob?.cancel()
         sidePanelJob?.cancel()
         sidePanelFetchJob?.cancel()
+        sidePanelExtendJob?.cancel()
         _uiState.update {
             it.copy(
                 focusedIndex = newIndex,
@@ -794,7 +943,7 @@ class ChannelListViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadSidePanelForFocused() {
+    private suspend fun loadSidePanelForFocused(allowExtendedFetch: Boolean = true) {
         val focused = _uiState.value.channels.getOrNull(_uiState.value.focusedIndex) ?: return
 
         val dbEpgId = if (focused.channel.epgChannelId.isBlank()) {
@@ -835,43 +984,50 @@ class ChannelListViewModel @Inject constructor(
         // Range: previous 7 days (full week of archive) to next 48 hours
         val pastMs = 7L * 24L * 3600_000L
         val windowStart = now - pastMs
-        val windowEnd = now + 48L * 3600_000L
+        val windowEnd = now + 72L * 3600_000L // now−7d … now+3d
 
         val entities = withContext(Dispatchers.IO) {
             epgDao.getProgramsForChannelIds(candidateIds, windowStart, windowEnd)
-        }.distinctBy { it.startMs }.sortedBy { it.startMs }
+                .distinctBy { it.startMs }
+                .sortedBy { it.startMs }
+        }
 
         val forcedCatchup = getForcedCatchupType()
         val isCatchupSupported = focused.channel.hasArchive(forcedCatchup)
         val archiveDays = if (focused.channel.catchupDays > 0) focused.channel.catchupDays else 7
         val archiveWindowStart = now - (archiveDays.toLong() * 24L * 3600_000L)
 
-        val items = entities.map { entity ->
-            val prog = entity.toDomain()
-            val isLive = now in prog.startMs..prog.endMs
-            val isPast = prog.endMs <= now
-            val withinArchiveWindow = prog.startMs >= archiveWindowStart
+        val items = withContext(Dispatchers.Default) {
+            entities.map { entity ->
+                val prog = entity.toDomain()
+                val isLive = now in prog.startMs..prog.endMs
+                val isPast = prog.endMs <= now
+                val withinArchiveWindow = prog.startMs >= archiveWindowStart
 
-            if (isPast && isCatchupSupported && withinArchiveWindow) {
-                SidePanelItem.CatchupSlot(
-                    program = prog,
-                    isAvailable = true,
-                )
-            } else {
-                val progress = if (isLive && prog.endMs > prog.startMs) {
-                    ((now - prog.startMs).toFloat() / (prog.endMs - prog.startMs).toFloat()).coerceIn(0f, 1f)
-                } else 0f
+                if (isPast && isCatchupSupported && withinArchiveWindow) {
+                    SidePanelItem.CatchupSlot(
+                        program = prog,
+                        isAvailable = true,
+                    )
+                } else {
+                    val progress = if (isLive && prog.endMs > prog.startMs) {
+                        ((now - prog.startMs).toFloat() / (prog.endMs - prog.startMs).toFloat()).coerceIn(0f, 1f)
+                    } else 0f
 
-                SidePanelItem.Programme(
-                    program = prog,
-                    isLive = isLive,
-                    progress = progress,
-                )
+                    SidePanelItem.Programme(
+                        program = prog,
+                        isLive = isLive,
+                        progress = progress,
+                    )
+                }
             }
         }
 
+        // Focus may have moved while we were querying — don't show another channel's schedule
+        if (_uiState.value.channels.getOrNull(_uiState.value.focusedIndex)?.channel?.id != focused.channel.id) return
+
+        sidePanelFetchJob?.cancel()
         if (items.isEmpty()) {
-            sidePanelFetchJob?.cancel()
             _uiState.update {
                 it.copy(
                     sidePanelItems = emptyList(),
@@ -880,16 +1036,53 @@ class ChannelListViewModel @Inject constructor(
                 )
             }
         } else {
-            sidePanelFetchJob?.cancel()
             val liveIndex = items.indexOfFirst { it is SidePanelItem.Programme && it.isLive }
-            val focusIndex = if (liveIndex >= 0) liveIndex else 0
+            val defaultIndex = if (liveIndex >= 0) liveIndex else 0
 
-            _uiState.update {
-                it.copy(
+            _uiState.update { state ->
+                // On a silent reload (after lazy fetch) keep the user's position inside the panel
+                val keepIndex = if (!allowExtendedFetch && state.isFocusInSidePanel) {
+                    val prevStart = when (val prev = state.sidePanelItems.getOrNull(state.sidePanelFocusedIndex)) {
+                        is SidePanelItem.Programme -> prev.program.startMs
+                        is SidePanelItem.CatchupSlot -> prev.program.startMs
+                        null -> null
+                    }
+                    prevStart?.let { start ->
+                        items.indexOfFirst {
+                            when (it) {
+                                is SidePanelItem.Programme -> it.program.startMs == start
+                                is SidePanelItem.CatchupSlot -> it.program.startMs == start
+                            }
+                        }
+                    }?.takeIf { it >= 0 }
+                } else null
+                state.copy(
                     sidePanelItems = items,
-                    sidePanelFocusedIndex = focusIndex,
+                    sidePanelFocusedIndex = keepIndex ?: defaultIndex,
                     isSidePanelEpgLoading = false,
                 )
+            }
+        }
+
+        // ── Lazy per-channel horizon extension (Live EPG mode only) ─────────────
+        if (allowExtendedFetch) {
+            val lastEnd = entities.maxOfOrNull { it.endMs } ?: 0L
+            val firstStart = entities.minOfOrNull { it.startMs } ?: Long.MAX_VALUE
+            val lacksFuture = lastEnd < now + 48L * 3600_000L
+            // Global sync covers ~now−24h; anything not reaching ~30h back means no deep archive yet.
+            val lacksArchive = isCatchupSupported && firstStart > now - 30L * 3600_000L
+            if (entities.isEmpty() || lacksFuture || lacksArchive) {
+                val channelId = focused.channel.id
+                sidePanelExtendJob?.cancel()
+                sidePanelExtendJob = viewModelScope.launch {
+                    delay(SIDE_PANEL_EXTEND_DELAY_MS) // only for channels the cursor actually rests on
+                    if (!epgSyncManager.isLiveServerEpgMode()) return@launch
+                    val stored = runCatching { epgSyncManager.fetchExtendedChannelSchedule(channelId) }.getOrDefault(false)
+                    val stillFocused = _uiState.value.channels.getOrNull(_uiState.value.focusedIndex)?.channel?.id == channelId
+                    if (stored && stillFocused && _uiState.value.viewMode == ScreenViewMode.CHANNELS) {
+                        loadSidePanelForFocused(allowExtendedFetch = false)
+                    }
+                }
             }
         }
     }
@@ -1123,5 +1316,9 @@ class ChannelListViewModel @Inject constructor(
         private const val DEFAULT_PROFILE_ID = 1L
         private const val PREVIEW_FOCUS_DEBOUNCE_MS = 60L
         private const val EPG_REQUEST_DELAY_AFTER_PREVIEW_MS = 180L
+        /** Extra rest time on a channel before the lazy per-channel EPG request is sent (~0.5 s total). */
+        private const val SIDE_PANEL_EXTEND_DELAY_MS = 300L
+        /** Quiet EPG horizon check interval while the screen is alive. */
+        private const val PERIODIC_EPG_CHECK_MS = 3L * 3600_000L
     }
 }

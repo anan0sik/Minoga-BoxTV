@@ -81,7 +81,19 @@ data class ChannelListUiState(
 
     /** Whether the exit confirmation dialog is open. */
     val isExitConfirmOpen: Boolean = false,
+
+    /** Global channel sort mode (persisted in prefs `channel_sort_mode`). */
+    val sortMode: ChannelSortMode = ChannelSortMode.NONE,
+
+    /** Whether the sort mode menu (opened from the top bar ⇅ button) is visible. */
+    val isSortMenuOpen: Boolean = false,
+
+    /** D-Pad focused option inside the sort menu (index in [ChannelSortMode.values]). */
+    val sortMenuFocusedIndex: Int = 0,
 ) {
+    /** Helper check for whether the sort button is currently focused. */
+    val isSortFocused: Boolean get() = topBarFocus == TopBarFocus.SORT
+
     /** Helper check for whether the settings icon is currently focused. */
     val isSettingsFocused: Boolean get() = topBarFocus == TopBarFocus.SETTINGS
 
@@ -128,6 +140,7 @@ enum class TopBarFocus {
     NONE,
     GROUP_SELECTOR,
     VOD,
+    SORT,
     SEARCH,
     SETTINGS,
 }
@@ -266,6 +279,18 @@ sealed class ChannelListIntent {
 
     /** Dismiss exit confirmation dialog without quitting. */
     data object DismissExitConfirm : ChannelListIntent()
+
+    /** Open the channel sort menu (OK on the ⇅ top bar button). */
+    data object OpenSortMenu : ChannelListIntent()
+
+    /** Close the channel sort menu without changing the mode. */
+    data object CloseSortMenu : ChannelListIntent()
+
+    /** Move D-Pad focus inside the sort menu. */
+    data class MoveSortMenuFocus(val delta: Int) : ChannelListIntent()
+
+    /** Apply a channel sort mode (persisted globally) and close the menu. */
+    data class SelectSortMode(val mode: ChannelSortMode) : ChannelListIntent()
 }
 
 /**

@@ -1,6 +1,7 @@
 package com.minogatv.box.core.network.di
 
 import com.minogatv.box.core.network.ProxyOkHttpClientFactory
+import com.minogatv.box.core.network.SmartDohDns
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import dagger.Module
@@ -45,6 +46,7 @@ object NetworkModule {
     @Singleton
     @BaseOkHttpClient
     fun provideBaseOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
+        .dns(SmartDohDns)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)

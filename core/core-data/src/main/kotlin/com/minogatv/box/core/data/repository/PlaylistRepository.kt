@@ -102,7 +102,24 @@ class PlaylistRepositoryImpl @Inject constructor(
                     .url(downloadUrl)
                     .header("Range", "bytes=0-1024")
                     .build()
-                response = client.newCall(getRequest).execute()
+                response = try {
+                    client.newCall(getRequest).execute()
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+            // Fallback: if direct access to the playlist server is blocked by ISP (DPI/IP block even with DoH),
+            // validate via Minoga TV lightweight text proxy (only fetches first 1 KB of M3U text, zero video load)
+            if (response == null || (!response.isSuccessful && response.code != 206)) {
+                response?.close()
+                val encoded = java.net.URLEncoder.encode(downloadUrl, "UTF-8")
+                val fallbackProxyUrl = "https://minogatvbox.duckdns.org/api/tv/proxy?url=$encoded"
+                val proxyRequest = Request.Builder()
+                    .url(fallbackProxyUrl)
+                    .header("Range", "bytes=0-1024")
+                    .build()
+                response = client.newCall(proxyRequest).execute()
             }
 
             response.use { res ->
@@ -219,18 +236,38 @@ class PlaylistRepositoryImpl @Inject constructor(
                 .url(downloadUrl)
                 .build()
 
-            val response = client.newCall(request).execute()
+            var response = try {
+                client.newCall(request).execute()
+            } catch (_: Exception) {
+                null
+            }
+
+            if (response == null || !response.isSuccessful) {
+                response?.close()
+                // Fallback to lightweight text-only M3U fetch via server if ISP blocks the playlist host directly
+                val encoded = java.net.URLEncoder.encode(downloadUrl, "UTF-8")
+                val fallbackProxyUrl = "https://minogatvbox.duckdns.org/api/tv/proxy?url=$encoded"
+                val fallbackReq = Request.Builder()
+                    .url(fallbackProxyUrl)
+                    .build()
+                response = client.newCall(fallbackReq).execute()
+            }
+
             if (!response.isSuccessful) {
+                val code = response.code
+                val msg = response.message
+                response.close()
                 return@withContext Result.failure(
-                    IOException("Ошибка загрузки плейлиста: HTTP ${response.code} ${response.message}"),
+                    IOException("Ошибка загрузки плейлиста: HTTP $code $msg"),
                 )
             }
 
-            val body = response.body
-                ?: return@withContext Result.failure(IOException("Пустой ответ от сервера плейлиста"))
-
-            val parseResult = body.byteStream().use { stream ->
-                M3uParser.parse(stream)
+            val parseResult = response.use { res ->
+                val body = res.body
+                    ?: return@withContext Result.failure(IOException("Пустой ответ от сервера плейлиста"))
+                body.byteStream().use { stream ->
+                    M3uParser.parse(stream)
+                }
             }
 
             val adultKeywords = M3uParser.ADULT_KEYWORDS
